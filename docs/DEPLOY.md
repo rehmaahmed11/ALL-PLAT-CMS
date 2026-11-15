@@ -118,6 +118,44 @@ Bundles are read out of KV on demand; a zip of a typical static site is well
 inside the 24 MB cap. Use `node scripts/make-bundle.mjs ./dist out.zip` to build
 one from a folder.
 
+## Automatic CMS deployments per site
+
+The panel can deploy the AMS CMS repository as a separate Worker for each CMS
+site. It builds the repository into one reusable master module and caches it in
+the panel's KV; later sites reuse that module instead of downloading GitHub
+again. Every instance receives its own D1 database and KV namespace, and the
+admin path is fixed at `/admin-panel`.
+
+One-time template preparation from a trusted machine:
+
+```bash
+npm install
+npm run cms:template:build
+CF_ACCOUNT_ID=<account-id> CF_API_TOKEN=<token> npm run cms:template:upload
+```
+
+The upload helper looks for the panel KV namespace titled
+`hosting-panel-cms-kv`. If the namespace has another title, also set
+`PANEL_KV_NAMESPACE_ID`. The template build fetches the public AMS CMS
+repository on `main`, applies the reverse-proxy host forwarding shim, and emits
+`dist/cms-template-worker.js`; run the upload after the build. `dist/` is
+ignored and should not be committed.
+
+On the deployed **hosting panel Worker**, set `CF_ACCOUNT_ID` and
+`CF_API_TOKEN` as Worker secrets (or set the account ID as a variable). The API
+token needs Workers Scripts edit, D1 edit, KV edit, and Workers account settings
+read access. Then create a site with kind **CMS**. The panel provisions an
+isolated child Worker and databases, sets it as the site's origin, and the
+existing domain route proxies traffic to it. Complete the CMS's first-run
+installer at `/install`; after installation the admin is at `/admin-panel`.
+
+Provisioning cannot happen until both the master template is in the panel KV
+and the panel Worker has those Cloudflare credentials. The API token is
+privileged; do not commit it or share it in chat. Each site consumes separate
+Cloudflare resources and is subject to your account's D1/KV/Worker limits.
+Deleting a managed site also deletes its child Worker, D1 database, and KV
+namespace.
+
 ## Scheduled work
 
 `wrangler.toml` registers `*/10 * * * *`. Every run:

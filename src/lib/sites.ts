@@ -92,7 +92,7 @@ export async function createSite(db: any, input: CreateSiteInput): Promise<Site>
     kind: input.kind,
     status: 'live',
     primary_host: host,
-    admin_slug: input.adminSlug || `admin-${slugToken(6)}`,
+    admin_slug: input.adminSlug || (input.kind === 'cms' ? 'admin-panel' : `admin-${slugToken(6)}`),
     owner_id: input.ownerId ?? null,
     node_url: input.nodeUrl ?? '',
     health_url: input.healthUrl || (host ? `https://${host}/api/health` : ''),
@@ -100,7 +100,7 @@ export async function createSite(db: any, input: CreateSiteInput): Promise<Site>
     branch: input.branch ?? 'main',
     notes: input.notes ?? '',
     theme: input.theme ?? '',
-    db_password: generatePassword(24),
+    db_password: input.kind === 'cms' ? '' : generatePassword(24),
     created_at: now,
     updated_at: now,
     last_check_at: null,
@@ -123,12 +123,14 @@ export async function createSite(db: any, input: CreateSiteInput): Promise<Site>
       [id('dom'), site.id, site.primary_host, 'primary', 'active', slugToken(16), now],
     ]);
   }
-  // Every CMS site starts with a DB_PASSWORD env var, so a local Node
-  // process can pick it up unchanged.
-  statements.push([
-    'INSERT INTO envvars (id,site_id,key,value,secret,updated_at) VALUES (?,?,?,?,?,?)',
-    [id('env'), site.id, 'DB_PASSWORD', site.db_password, 1, now],
-  ]);
+  // The automated CMS template is Cloudflare-native (D1 + KV), so it has no
+  // Node DB_PASSWORD. Keep the legacy password only for non-CMS proxy sites.
+  if (site.db_password) {
+    statements.push([
+      'INSERT INTO envvars (id,site_id,key,value,secret,updated_at) VALUES (?,?,?,?,?,?)',
+      [id('env'), site.id, 'DB_PASSWORD', site.db_password, 1, now],
+    ]);
+  }
   await batch(db, statements);
   return site;
 }
@@ -161,6 +163,7 @@ export async function deleteSite(db: any, siteId: string): Promise<void> {
     ['DELETE FROM pages WHERE site_id=?', [siteId]],
     ['DELETE FROM media WHERE site_id=?', [siteId]],
     ['DELETE FROM checks WHERE site_id=?', [siteId]],
+    ['DELETE FROM cms_instances WHERE site_id=?', [siteId]],
     ['DELETE FROM sites WHERE id=?', [siteId]],
   ]);
 }
