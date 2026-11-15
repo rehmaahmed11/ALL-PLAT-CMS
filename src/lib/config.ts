@@ -25,9 +25,17 @@ export function resetInstallState(env?: Env): void {
   if (env) installedMemo.delete(env);
 }
 
+/** The install flag and the config it points at have drifted apart. */
+export class ConfigMissingError extends Error {
+  constructor() {
+    super('CMS config missing from KV');
+    this.name = 'ConfigMissingError';
+  }
+}
+
 export async function getConfig(env: Env): Promise<Config> {
   const cfg = await env.KV.get<Config>('config', 'json');
-  if (!cfg) throw new Error('CMS config missing from KV');
+  if (!cfg || typeof cfg !== 'object' || !('adminSlug' in cfg)) throw new ConfigMissingError();
   return cfg;
 }
 

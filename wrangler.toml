@@ -14,16 +14,22 @@ fallthrough = true
 crons = ["*/5 * * * *"]
 
 # --- Bindings -------------------------------------------------------------
-# No IDs needed: `wrangler deploy` creates the D1 database and KV namespace
-# automatically on the first deploy and reuses them afterwards.
+# `wrangler deploy` with Wrangler >= 4.45.0 can auto-provision D1 and KV for a
+# terminal deploy. Workers Builds (Git) and dashboard deploys need real IDs
+# committed here: run `npm run setup:cloudflare` once from a logged-in terminal
+# and commit the two lines it inserts. Automatic provisioning in CI writes IDs
+# to the build runner's temporary config only, so it cannot fix a Git deploy.
+# Never commit placeholder IDs.
+#
 # Uploaded media is stored in KV, so no R2 bucket (and no payment card) is needed.
-# To use resources you created yourself, add `database_id = "..."` / `id = "..."`.
 
 [[d1_databases]]
+# database_id = "..." # inserted by npm run setup:cloudflare
 binding = "DB"
 database_name = "edge_cms"
 
 [[kv_namespaces]]
+# id = "..." # inserted by npm run setup:cloudflare
 binding = "KV"
 
 # Custom domain (optional). The CMS works on workers.dev without this.

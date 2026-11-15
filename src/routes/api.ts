@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
-import type { Env } from '../types';
+import type { Config, Env } from '../types';
 import { getSettings } from '../lib/config';
 import { getFile } from '../lib/files';
+import { BINDING_FIX, inspectBindings } from '../lib/diagnostics';
 import { findContent, listPosts, toViews } from '../lib/content';
 import { hasTable } from '../lib/schema';
 
@@ -14,16 +15,96 @@ api.use('*', async (c, next) => {
   if (!c.res.headers.has('Cache-Control')) c.header('Cache-Control', 'public, max-age=60');
 });
 
-/** Read-only self-check of the three storage backends. Works before and after install. */
+/**
+ * Read-only self-check of the three storage backends plus the bindings they
+ * depend on. Deliberately stays answerable before install and when Cloudflare
+ * deployed the script with no DB/KV bindings at all.
+ */
 api.get('/health', async (c) => {
+  const state = inspectBindings(c.env);
   const checks = { database: false, keyvalue: false, media: false };
+  const issues: string[] = [];
+  const errors: Record<string, string> = {};
   let installed = false;
-  try { await c.env.DB.prepare('SELECT 1 AS x').first(); checks.database = true; } catch { /* reported below */ }
-  try { installed = !!(await c.env.KV.get('installed')); checks.keyvalue = true; } catch { /* reported below */ }
-  try { await getFile(c.env, 'health-check/none'); checks.media = true; } catch { /* reported below */ }
-  const ok = checks.database && checks.keyvalue && checks.media;
+  let configuration: 'ok' | 'missing' | 'unknown' | 'not_installed' = 'unknown';
+
+  if (state.bindings.DB) {
+    try {
+      await c.env.DB.prepare('SELECT 1 AS x').first();
+      checks.database = true;
+    } catch (err) {
+      console.error('[edge-cms] health: D1 query failed:', err);
+      errors.database = 'D1 query failed; check the DB binding and database ID.';
+      issues.push('database_query_failed');
+    }
+  } else {
+    errors.database = 'The DB (D1 database) binding is missing from this Worker.';
+    issues.push('missing_binding:DB');
+  }
+
+  if (state.bindings.KV) {
+    try {
+      installed = !!(await c.env.KV.get('installed'));
+      checks.keyvalue = true;
+    } catch (err) {
+      console.error('[edge-cms] health: KV read failed:', err);
+      errors.keyvalue = 'KV read failed; check the KV binding and namespace ID.';
+      issues.push('keyvalue_read_failed');
+    }
+    if (installed) {
+      try {
+        const cfg = await c.env.KV.get<Config>('config', 'json');
+        configuration = cfg && typeof cfg === 'object' && 'adminSlug' in cfg ? 'ok' : 'missing';
+        if (configuration === 'missing') issues.push('configuration_missing');
+      } catch (err) {
+        console.error('[edge-cms] health: config read failed:', err);
+        configuration = 'missing';
+        issues.push('configuration_missing');
+      }
+    } else {
+      configuration = 'not_installed';
+    }
+  } else {
+    errors.keyvalue = 'The KV (KV namespace) binding is missing from this Worker.';
+    issues.push('missing_binding:KV');
+  }
+
+  // Uploads live in FILES on Node and in KV on Cloudflare. Without either, the
+  // media check cannot pass, but it must not throw a generic 500 here.
+  if (state.bindings.KV || c.env.FILES) {
+    try {
+      await getFile(c.env, 'health-check/none');
+      checks.media = true;
+    } catch (err) {
+      console.error('[edge-cms] health: media read failed:', err);
+      errors.media = 'Media read failed; check the file store or KV binding.';
+      issues.push('media_read_failed');
+    }
+  } else {
+    errors.media = 'No media store is available without a KV binding or FILES store.';
+    issues.push('media_unavailable');
+  }
+
+  const storageOk = checks.database && checks.keyvalue && checks.media;
+  const ok = storageOk && configuration !== 'missing';
   const runtime = typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers' ? 'cloudflare-workers' : 'node';
-  return c.json({ ok, runtime, installed, checks }, ok ? 200 : 503, { 'Cache-Control': 'no-store' });
+  const missingBinding = issues.some((issue) => issue.startsWith('missing_binding:'));
+  const fix = missingBinding
+    ? BINDING_FIX
+    : issues.includes('configuration_missing')
+      ? 'Restore the KV `config` key from backup, or reinstall against fresh D1/KV resources. See docs/CLOUDFLARE-DEPLOY.md.'
+      : 'Check the binding IDs and `npx wrangler tail edge-cms` logs, then redeploy.';
+
+  return c.json({
+    ok,
+    runtime,
+    installed,
+    checks,
+    bindings: state.bindings,
+    configuration,
+    issues,
+    ...(issues.length ? { fix, errors } : {}),
+  }, ok ? 200 : 503, { 'Cache-Control': 'no-store' });
 });
 
 api.get('/posts', async (c) => {
