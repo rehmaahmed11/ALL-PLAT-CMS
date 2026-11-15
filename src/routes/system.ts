@@ -359,6 +359,11 @@ export const settings: Handler = async (c) => {
           <p class="hint">Change PANEL_PATH / PANEL_HOST with <span class="mono">wrangler secret put</span> or the dashboard's variables editor, then redeploy.</p>
         </div>
         <div class="card">
+          <h3>Automatic CMS deployment</h3>
+          <p class="muted" style="font-size:.84rem">A Cloudflare API token plus the cached CMS template let the panel create a Worker, D1 database and KV namespace for every new CMS site.</p>
+          <a class="btn sm" href="${P(c, '/cloudflare')}">${raw(icons.server)} Open Cloudflare settings</a>
+        </div>
+        <div class="card">
           <h3>Free-plan footprint</h3>
           <div class="col" style="gap:10px;font-size:.85rem">
             <div><div class="row between"><span>Sites</span><b>${sites} / 1000</b></div><div class="bar" style="margin-top:4px"><i style="width:${Math.min(100, sites / 10)}%"></i></div></div>
@@ -470,7 +475,23 @@ _ams-verify.<host> with the token shown on the Domains page to verify ownership.
 - Static bundle: upload a zip under Deployments; the Worker serves it from KV
   with SPA fallback and immutable caching for hashed assets.
 
-## 5. Free-plan guardrails
+## 5. Automatic per-site CMS deployment
+System -> Cloudflare connects the panel to your Cloudflare account:
+  1. Create an API token with Workers Scripts:Edit, D1:Edit, KV Storage:Edit
+     and Account Settings:Read for that account.
+  2. Paste the account ID and the token, then press Save & verify. The token is
+     sealed with AES-GCM (key in KV, ciphertext in D1) and never appears in the
+     audit log, page source or error text.
+  3. The CMS template needs no build step: the panel downloads the prebuilt
+     module from templates/cms-template-worker.js once and caches it in KV.
+     To pin your own build, run npm run cms:template:build and upload
+     dist/cms-template-worker.js there (or npm run cms:template:upload).
+Every new CMS site then gets its own Worker, D1 database, KV namespace and a
+*/5 cron by itself. Sites created before the connection was made are listed on
+that page and deploy with one Retry click. Worker secrets CF_ACCOUNT_ID and
+CF_API_TOKEN, when set, always win over values saved in the panel.
+
+## 6. Free-plan guardrails
 - KV value limit 25 MB (panel caps uploads at 24 MB).
 - KV writes 1,000/day — uploads, backups and deployments each cost one.
 - D1: 100k rows written/day, 5 GB storage. Check history is trimmed to 200
@@ -479,12 +500,14 @@ _ams-verify.<host> with the token shown on the Domains page to verify ownership.
   (indexed lookups, no per-request KV writes) and password hashing only happens
   at sign-in. Set KDF_ITERATIONS=50000 if you see CPU limits during login.
 
-## 6. Automation
+## 7. Automation
   curl ${publicBase}/api/sites -H "Authorization: Bearer ams_xxx"
 Create keys under API keys. Scopes: read, write.
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 - "No site at this address" — the host is not attached to a site yet.
+- CMS deployment failed — open System -> Cloudflare: it shows the exact reason
+  per site, retries the deployment and checks the token's permissions.
 - Installer is gone — an owner exists; sign in instead.
 - Restore a backup — Backups -> Restore replaces config, env, domains and pages.
 - Lost the panel path — set PANEL_PATH as a Worker variable and redeploy.

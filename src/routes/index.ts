@@ -7,6 +7,7 @@ import * as monitor from './monitor.ts';
 import * as content from './content.ts';
 import * as ops from './ops.ts';
 import * as system from './system.ts';
+import * as cloudflare from './cloudflare.ts';
 import * as api from './api.ts';
 
 export function buildRouter(): Router {
@@ -89,6 +90,13 @@ export function buildRouter(): Router {
   r.post('/apikeys/create', system.apiKeyCreate);
   r.post('/apikeys/:id/delete', system.apiKeyDelete);
   r.get('/audit', system.auditPage);
+  r.get('/cloudflare', cloudflare.page);
+  r.post('/cloudflare/credentials', cloudflare.saveCredentials);
+  r.post('/cloudflare/test', cloudflare.testConnection);
+  r.post('/cloudflare/disconnect', cloudflare.disconnect);
+  r.post('/cloudflare/template', cloudflare.uploadTemplate);
+  r.post('/cloudflare/template/delete', cloudflare.deleteTemplate);
+  r.post('/cloudflare/retry', cloudflare.retryPending);
   r.get('/settings', system.settings);
   r.post('/settings', system.settingsSave);
   r.post('/settings/system', system.systemAction);

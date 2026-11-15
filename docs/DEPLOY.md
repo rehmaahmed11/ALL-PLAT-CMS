@@ -141,10 +141,26 @@ repository on `main`, applies the reverse-proxy host forwarding shim, and emits
 `dist/cms-template-worker.js`; run the upload after the build. `dist/` is
 ignored and should not be committed.
 
-On the deployed **hosting panel Worker**, set `CF_ACCOUNT_ID` and
-`CF_API_TOKEN` as Worker secrets (or set the account ID as a variable). The API
-token needs Workers Scripts edit, D1 edit, KV edit, and Workers account settings
-read access. Then create a site with kind **CMS**. The panel provisions an
+The panel ships a prebuilt CMS module in `templates/cms-template-worker.js`, so
+you do not have to run the build above: when the KV cache is empty the panel
+downloads that file once and stores it. Build and upload your own only if you
+want to pin a specific CMS revision, and run `npm run cms:template:refresh`
+afterwards to keep the committed copy in step with the CMS repository.
+
+Then connect the panel to Cloudflare: open **System → Cloudflare** in the panel,
+paste the 32-character account ID and an API token with Workers Scripts edit, D1
+edit, KV edit, and Workers account settings read access, and press *Save &
+verify*. The panel verifies the token, the account and the workers.dev subdomain
+before storing the token sealed with AES-GCM (key in KV, ciphertext in D1). The
+same page accepts `dist/cms-template-worker.js` as an upload, so step 3 above can
+also be done from the browser.
+
+If you would rather keep the token out of the database, set `CF_ACCOUNT_ID` and
+`CF_API_TOKEN` as Worker secrets with `wrangler secret put` (or the dashboard);
+Worker secrets always win over values saved in the panel.
+
+Then create a site with kind **CMS**. Sites created before the connection was
+made are listed on the Cloudflare page and deploy with one *Retry* click. The panel provisions an
 isolated child Worker and databases, sets it as the site's origin, and the
 existing domain route proxies traffic to it. Complete the CMS's first-run
 installer at `/install`; after installation the admin is at `/admin-panel`.

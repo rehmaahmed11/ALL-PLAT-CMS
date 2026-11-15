@@ -35,6 +35,7 @@ const NAV: Array<{ group?: string; items: NavItem[] }> = [
       { href: '/team', label: 'Team', icon: 'users' },
       { href: '/apikeys', label: 'API keys', icon: 'key' },
       { href: '/audit', label: 'Audit log', icon: 'shield' },
+      { href: '/cloudflare', label: 'Cloudflare', icon: 'server' },
       { href: '/settings', label: 'Settings', icon: 'cog' },
       { href: '/docs', label: 'Docs', icon: 'book' },
     ],

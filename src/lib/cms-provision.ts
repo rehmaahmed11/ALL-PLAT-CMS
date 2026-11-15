@@ -6,11 +6,22 @@
  * creation reuses that immutable artifact; no GitHub request is made per site.
  */
 import type { Env, Site } from '../types.ts';
-import { one, run } from '../db/index.ts';
+import { all, one, run } from '../db/index.ts';
 import { updateSite } from './sites.ts';
+import { CfApiError, cfFetch, resolveCfCredentials, type CfCredentials } from './cf.ts';
 
-const API = 'https://api.cloudflare.com/client/v4';
 const DEFAULT_TEMPLATE_KEY = 'cms/template-v1';
+/**
+ * Prebuilt CMS Worker module committed to this repository
+ * (`templates/cms-template-worker.js`, refreshed with
+ * `npm run cms:template:build && npm run cms:template:refresh`).
+ *
+ * It is only used when the panel KV has no template yet, which keeps a fresh
+ * deployment working without a local build: connect Cloudflare, create a site,
+ * done. The download is cached in KV so it happens at most once per panel.
+ */
+const DEFAULT_TEMPLATE_URL =
+  'https://raw.githubusercontent.com/rizwanahmedsora9-pixel/Hosting-Panel-CMS/main/templates/cms-template-worker.js';
 export type CmsInstance = {
   site_id: string;
   worker_name: string;
@@ -25,34 +36,128 @@ export type CmsInstance = {
 
 export class CmsProvisionError extends Error {}
 
-type Cloudflare = { accountId: string; token: string };
+export const NOT_CONFIGURED_MESSAGE =
+  'Cloudflare API access is not connected yet, so no CMS Worker can be created. Open System → Cloudflare in the panel and connect an account ID + API token (or set the CF_ACCOUNT_ID and CF_API_TOKEN Worker secrets).';
 
-function credentials(env: Env): Cloudflare {
-  const accountId = String(env.CF_ACCOUNT_ID ?? '').trim();
-  const token = String(env.CF_API_TOKEN ?? '').trim();
-  if (!accountId || !token) {
-    throw new CmsProvisionError('Automatic CMS deployment is not configured. Set CF_ACCOUNT_ID and the CF_API_TOKEN secret on this Worker.');
-  }
-  return { accountId, token };
+async function credentials(env: Env): Promise<CfCredentials> {
+  const auth = await resolveCfCredentials(env);
+  if (!auth) throw new CmsProvisionError(NOT_CONFIGURED_MESSAGE);
+  return auth;
 }
 
-async function cf<T>(auth: Cloudflare, path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${API}${path}`, {
-    ...init,
-    headers: {
-      authorization: `Bearer ${auth.token}`,
-      ...(init.body instanceof FormData ? {} : { 'content-type': 'application/json' }),
-      ...(init.headers ?? {}),
-    },
-  });
-  let payload: any;
-  try { payload = await response.json(); } catch { payload = null; }
-  if (!response.ok || payload?.success === false) {
-    const detail = Array.isArray(payload?.errors) ? payload.errors.map((e: any) => e.message).join('; ') : '';
-    // Never include response headers, request bodies, or the API token in errors.
-    throw new CmsProvisionError(`Cloudflare API ${response.status}${detail ? `: ${detail}` : ''}`);
+/** Wrap Cloudflare errors so callers only ever see the panel's own error type. */
+async function cf<T>(auth: CfCredentials, path: string, init: RequestInit = {}): Promise<T> {
+  try {
+    return await cfFetch<T>(auth, path, init);
+  } catch (err) {
+    if (err instanceof CfApiError) throw new CmsProvisionError(err.message);
+    throw err;
   }
-  return payload?.result as T;
+}
+
+/** KV key the prebuilt CMS Worker module is cached under. */
+export function cmsTemplateKey(env: Env): string {
+  return String(env.CMS_TEMPLATE_KEY ?? DEFAULT_TEMPLATE_KEY).trim() || DEFAULT_TEMPLATE_KEY;
+}
+
+/**
+ * Where the prebuilt template can be downloaded from when KV is empty.
+ * Override with the CMS_TEMPLATE_URL variable to pin a different build.
+ */
+export function cmsTemplateUrl(env: Env): string {
+  return String(env.CMS_TEMPLATE_URL ?? DEFAULT_TEMPLATE_URL).trim() || DEFAULT_TEMPLATE_URL;
+}
+
+/**
+ * Whether the reusable CMS build is present in the panel KV. The body is only
+ * read on demand (it is a few megabytes), never on a scheduling path.
+ */
+export async function cmsTemplateInfo(env: Env): Promise<{ key: string; present: boolean; bytes: number; fallbackUrl: string }> {
+  const key = cmsTemplateKey(env);
+  const fallbackUrl = cmsTemplateUrl(env);
+  try {
+    const body = await env.KV.get(key, 'text');
+    if (!body || typeof body !== 'string') return { key, present: false, bytes: 0, fallbackUrl };
+    return { key, present: body.includes('fetch'), bytes: body.length, fallbackUrl };
+  } catch {
+    return { key, present: false, bytes: 0, fallbackUrl };
+  }
+}
+
+export type LoadedTemplate = { script: string; key: string; source: 'kv' | 'download' };
+
+/**
+ * The CMS Worker module: from KV when it has been uploaded, otherwise the
+ * published prebuilt build, which is then cached in KV so later sites and
+ * later deployments never download it again.
+ */
+export async function loadCmsTemplate(env: Env): Promise<LoadedTemplate> {
+  const key = cmsTemplateKey(env);
+  const cached = await env.KV.get(key, 'text').catch(() => null);
+  if (typeof cached === 'string' && cached.includes('fetch')) {
+    return { script: cached, key, source: 'kv' };
+  }
+
+  const url = cmsTemplateUrl(env);
+  let downloaded = '';
+  try {
+    const response = await fetch(url, { headers: { 'user-agent': 'AMS-Cloud-Panel template-loader' } });
+    if (!response.ok) {
+      throw new CmsProvisionError(
+        `The CMS template is not in the panel KV and the prebuilt copy could not be downloaded (HTTP ${response.status}). Upload dist/cms-template-worker.js under System → Cloudflare, or run npm run cms:template:upload.`,
+      );
+    }
+    downloaded = await response.text();
+  } catch (err) {
+    if (err instanceof CmsProvisionError) throw err;
+    throw new CmsProvisionError(
+      `The CMS template is not in the panel KV and the prebuilt copy could not be fetched (${String((err as Error)?.message ?? err).slice(0, 120)}). Upload dist/cms-template-worker.js under System → Cloudflare.`,
+    );
+  }
+  if (!downloaded.includes('fetch')) {
+    throw new CmsProvisionError(
+      'The downloaded CMS template does not look like a Worker module. Upload dist/cms-template-worker.js under System → Cloudflare.',
+    );
+  }
+  // Cache for next time. A failed write must not fail the deployment.
+  try {
+    await env.KV.put(key, downloaded, { metadata: { bytes: downloaded.length, source: 'prebuilt-release' } });
+  } catch {
+    /* best effort */
+  }
+  return { script: downloaded, key, source: 'download' };
+}
+
+export type PendingCmsSite = {
+  site_id: string;
+  site_name: string;
+  site_host: string;
+  worker_name: string;
+  status: string;
+  error: string;
+  updated_at: number;
+};
+
+/**
+ * CMS sites that are not deployed yet — either never attempted (no row in
+ * cms_instances, which is what a deferred creation leaves behind) or a failed
+ * / in-progress attempt. Newest first.
+ */
+export async function pendingCmsInstances(db: any, limit = 25): Promise<PendingCmsSite[]> {
+  return all<PendingCmsSite>(
+    db,
+    `SELECT s.id AS site_id,
+            s.name AS site_name,
+            s.primary_host AS site_host,
+            COALESCE(ci.worker_name,'') AS worker_name,
+            COALESCE(ci.status,'none') AS status,
+            COALESCE(ci.error,'') AS error,
+            COALESCE(ci.updated_at, s.created_at) AS updated_at
+       FROM sites s LEFT JOIN cms_instances ci ON ci.site_id = s.id
+      WHERE s.kind='cms' AND (ci.site_id IS NULL OR ci.status <> 'active')
+      ORDER BY updated_at DESC LIMIT ?`,
+    [limit],
+  );
 }
 
 function safeName(value: string, max = 56): string {
@@ -64,12 +169,8 @@ export async function getCmsInstance(db: any, siteId: string): Promise<CmsInstan
 }
 
 export async function provisionCms(env: Env, site: Site): Promise<CmsInstance> {
-  const auth = credentials(env);
-  const templateKey = String(env.CMS_TEMPLATE_KEY ?? DEFAULT_TEMPLATE_KEY).trim() || DEFAULT_TEMPLATE_KEY;
-  const script = await env.KV.get(templateKey, 'text');
-  if (!script || typeof script !== 'string' || !script.includes('fetch')) {
-    throw new CmsProvisionError(`CMS template is missing from panel KV (key: ${templateKey}). Run npm run cms:template:build, then npm run cms:template:upload.`);
-  }
+  const auth = await credentials(env);
+  const { script } = await loadCmsTemplate(env);
 
   const existing = await getCmsInstance(env.DB, site.id);
   const stamp = Date.now();
@@ -145,7 +246,18 @@ export async function provisionCms(env: Env, site: Site): Promise<CmsInstance> {
 export async function deleteCmsInstance(env: Env, siteId: string): Promise<void> {
   const instance = await getCmsInstance(env.DB, siteId);
   if (!instance) return;
-  const auth = credentials(env);
+  const auth = await resolveCfCredentials(env);
+  if (!auth) {
+    // Credentials were never configured, so provisioning failed before it
+    // created anything. Only the local row exists; deleting the site is safe.
+    if (!instance.database_id && !instance.kv_namespace_id && !instance.worker_url) {
+      await run(env.DB, 'DELETE FROM cms_instances WHERE site_id=?', [siteId]);
+      return;
+    }
+    throw new CmsProvisionError(
+      'This site has Cloudflare resources that cannot be removed without API access. Connect Cloudflare under System → Cloudflare, then delete the site again.',
+    );
+  }
   const account = encodeURIComponent(auth.accountId);
   // Remove the live Worker first so it cannot continue serving while its data is deleted.
   const remove = async (path: string) => {

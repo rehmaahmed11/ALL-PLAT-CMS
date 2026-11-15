@@ -14,7 +14,8 @@ import { generatePassword, slugToken } from '../lib/crypto.ts';
 import { audit } from '../lib/audit.ts';
 import { errText } from '../lib/runtime.ts';
 import { serveBundlePath } from './public.ts';
-import { deleteCmsInstance, getCmsInstance, provisionCms } from '../lib/cms-provision.ts';
+import { cmsTemplateInfo, deleteCmsInstance, getCmsInstance, provisionCms } from '../lib/cms-provision.ts';
+import { getCfStatus } from '../lib/cf.ts';
 
 function flash(c: Ctx): Ctx {
   consumeFlash(c, parseCookies(c.req.headers.get('cookie')));
@@ -90,6 +91,9 @@ export const newForm: Handler = async (c) => {
   const gate = requireAdmin(c);
   if (gate) return gate;
   flash(c);
+  const cf = await getCfStatus(c.env);
+  const template = await cmsTemplateInfo(c.env);
+  const deployReady = cf.configured && template.present;
   const body = h`
     ${pageHeader('New site', 'One hostname, one admin path, one set of credentials',
       h`<a class="btn ghost" href="${P(c, '/sites')}">Cancel</a>`)}
@@ -116,6 +120,21 @@ export const newForm: Handler = async (c) => {
 
         <div class="card">
           <h2>Automatic CMS deployment</h2>
+          ${deployReady
+            ? h`<div class="note" style="margin-bottom:12px;border-color:rgba(52,211,153,.35)">
+                <div class="row" style="gap:8px;align-items:flex-start"><span style="color:var(--ok)">${raw(icons.check)}</span>
+                  <div><b style="font-size:.88rem">Cloudflare is connected</b>
+                    <div class="muted" style="font-size:.82rem">This site's Worker, D1 database and KV namespace are created as soon as you press Create site.</div></div></div>
+              </div>`
+            : h`<div class="note" style="margin-bottom:12px;border-color:rgba(251,191,36,.35)">
+                <div class="row" style="gap:8px;align-items:flex-start"><span style="color:var(--warn)">${raw(icons.warning)}</span>
+                  <div><b style="font-size:.88rem">CMS auto-deployment is not ready yet</b>
+                    <div class="muted" style="font-size:.82rem">${!cf.configured
+                      ? 'No Cloudflare API access is connected.'
+                      : 'The CMS template is not cached in the panel KV.'}
+                      The site will still be created and can be deployed later — no data is lost.</div></div></div>
+                <a class="btn sm" href="${P(c, '/cloudflare')}" style="margin-bottom:12px">${raw(icons.shieldcheck)} Finish setup in System → Cloudflare</a>
+              </div>`}
           <p class="muted" style="font-size:.84rem">CMS sites reuse the cached build from the AMS CMS repository. Each site receives its own Worker, D1 database and KV namespace; its admin URL is <span class="mono">/admin-panel</span>.</p>
           <input type="hidden" name="repo" value="https://github.com/rizwanahmedsora9-pixel/ams-builds.online">
           <p class="hint">The master template is built and cached once. New websites do not download the repository again. Configure Cloudflare provisioning and upload the master template once before creating CMS sites.</p>
@@ -139,7 +158,13 @@ export const newForm: Handler = async (c) => {
         </div>
         <div class="card">
           <h3>Before first CMS deployment</h3>
-          <p class="muted" style="font-size:.84rem">Build and upload the CMS template once, and configure <span class="mono">CF_ACCOUNT_ID</span> plus the <span class="mono">CF_API_TOKEN</span> Worker secret. Each site then gets isolated storage and a fresh CMS install wizard.</p>
+          <div class="col" style="gap:8px;font-size:.84rem">
+            <div class="row" style="gap:8px"><span style="color:${cf.configured ? 'var(--ok)' : 'var(--warn)'}">${raw(cf.configured ? icons.check : icons.warning)}</span>
+              Cloudflare API access</div>
+            <div class="row" style="gap:8px"><span style="color:${template.present ? 'var(--ok)' : 'var(--warn)'}">${raw(template.present ? icons.check : icons.warning)}</span>
+              CMS template in KV</div>
+          </div>
+          <p class="hint" style="margin-top:10px">Both are set up once, from the panel, at <a href="${P(c, '/cloudflare')}">System → Cloudflare</a>. Each site then gets isolated storage and a fresh CMS install wizard.</p>
         </div>
         <button class="btn primary" style="width:100%;padding:11px">Create site</button>
       </div>
@@ -166,13 +191,26 @@ export const create: Handler = async (c) => {
     });
     await audit(c, 'site.create', 'site', site.id, { name: site.name, host: site.primary_host });
     if (kind === 'cms') {
+      const cf = await getCfStatus(c.env);
+      if (!cf.configured) {
+        // Nothing to deploy with yet. Creating the site is still useful, so say
+        // exactly what is missing instead of reporting a failed deployment.
+        await audit(c, 'cms.provision', 'site', site.id, { status: 'deferred', reason: 'cloudflare-not-connected' });
+        return flashRedirect(
+          c, P(c, `/sites/${site.id}`), 'info',
+          `Site "${site.name}" created. Its CMS was not deployed because Cloudflare API access is not connected yet — open System → Cloudflare, connect the account, then press Deploy CMS on this page.`,
+        );
+      }
       try {
         await provisionCms(c.env, site);
         await audit(c, 'cms.provision', 'site', site.id, { status: 'active' });
         return flashRedirect(c, P(c, `/sites/${site.id}`), 'ok', `Site created and its isolated CMS deployed. Finish first-time setup at ${site.primary_host ? `https://${site.primary_host}/install` : 'the worker URL + /install'}, then sign in at /admin-panel.`);
       } catch (err) {
         await audit(c, 'cms.provision', 'site', site.id, { status: 'error', error: String((err as Error)?.message ?? err).slice(0, 200) });
-        return flashRedirect(c, P(c, `/sites/${site.id}`), 'err', `Site created, but CMS auto-deployment needs setup: ${String((err as Error)?.message ?? err).slice(0, 220)}`);
+        return flashRedirect(
+          c, P(c, `/sites/${site.id}`), 'err',
+          `Site created, but the CMS deployment did not finish: ${String((err as Error)?.message ?? err).slice(0, 220)}`,
+        );
       }
     }
     return flashRedirect(c, P(c, `/sites/${site.id}`), 'ok', `Site "${site.name}" created.`);
@@ -203,6 +241,7 @@ export const detail: Handler = async (c) => {
   const uptime = await uptimeFor(c.env.DB, site.id, 40);
   const active = deps.find((d) => d.status === 'active');
   const cmsInstance = site.kind === 'cms' ? await getCmsInstance(c.env.DB, site.id) : null;
+  const cf = site.kind === 'cms' ? await getCfStatus(c.env) : null;
   const tab = q(c, 'tab', 'overview');
 
   const tabs = [
@@ -354,16 +393,35 @@ export const detail: Handler = async (c) => {
 
       <div class="stack">
         ${site.kind === 'cms' ? h`<div class="card">
-          <h3>Isolated CMS deployment</h3>
+          <div class="row between" style="align-items:flex-start">
+            <h3 style="margin:0">Isolated CMS deployment</h3>
+            ${cmsInstance?.status === 'active'
+              ? badge('active', 'ok')
+              : cmsInstance?.status === 'error'
+                ? badge('failed', 'err')
+                : cmsInstance
+                  ? badge('pending', 'warn')
+                  : badge('not deployed', 'mute')}
+          </div>
           ${cmsInstance?.status === 'active'
-            ? h`<p class="muted" style="font-size:.84rem">Deployed from the cached AMS CMS template. This site has its own Worker, D1 database and KV namespace.</p>
+            ? h`<p class="muted" style="font-size:.84rem;margin-top:10px">Deployed from the cached AMS CMS template. This site has its own Worker, D1 database and KV namespace.</p>
                 <p class="mono" style="font-size:.82rem">Worker: ${cmsInstance.worker_name}</p>
                 <div class="actions">
                   <a class="btn sm" href="${site.primary_host ? `https://${site.primary_host}/install` : `${cmsInstance.worker_url}/install`}" target="_blank" rel="noopener">Open installer</a>
                   <a class="btn sm ghost" href="${site.primary_host ? `https://${site.primary_host}/admin-panel` : `${cmsInstance.worker_url}/admin-panel`}" target="_blank" rel="noopener">Open /admin-panel</a>
                 </div>`
-            : h`<p class="muted" style="font-size:.84rem">${cmsInstance?.status === 'error' ? `Deployment failed: ${cmsInstance.error}` : 'Not deployed yet. This needs the cached CMS template and Cloudflare provisioning credentials.'}</p>
-                ${cmsInstance?.status === 'provisioning' ? h`<span class="badge warn">Provisioning</span>` : ''}
+            : h`<p class="muted" style="font-size:.84rem;margin-top:10px">${cmsInstance?.status === 'error'
+                ? `The last deployment attempt did not finish: ${cmsInstance.error}`
+                : 'Each CMS site runs on its own Worker with a dedicated D1 database and KV namespace, all created from the cached CMS template.'}</p>
+                ${cf && !cf.configured
+                  ? h`<div class="note" style="margin-top:10px;border-color:rgba(251,191,36,.35)">
+                      <div class="row" style="gap:8px;align-items:flex-start"><span style="color:var(--warn)">${raw(icons.warning)}</span>
+                        <div><b style="font-size:.87rem">Cloudflare API access is not connected</b>
+                          <div class="muted" style="font-size:.82rem">Add an account ID and API token once and every future CMS deployment runs by itself.</div></div></div>
+                      <a class="btn sm" href="${P(c, '/cloudflare')}" style="margin-top:10px">${raw(icons.shieldcheck)} Connect Cloudflare</a>
+                    </div>`
+                  : ''}
+                <p class="hint" style="margin-top:10px">The CMS template downloads automatically on the first deployment. Credentials and the template are managed in <a href="${P(c, '/cloudflare')}">System → Cloudflare</a>.</p>
                 <form method="post" action="${P(c, `/sites/${site.id}/cms-provision`)}" style="margin-top:10px">${csrfInput(c)}
                   <button class="btn sm primary">${cmsInstance ? 'Retry CMS deployment' : 'Deploy CMS'}</button></form>`}
         </div>` : ''}
@@ -524,7 +582,7 @@ export const remove: Handler = async (c) => {
   try {
     await deleteCmsInstance(c.env, site.id);
   } catch (err) {
-    return flashRedirect(c, P(c, `/sites/${site.id}`), 'err', `CMS resources were not fully deleted: ${String((err as Error)?.message ?? err).slice(0, 240)}. Configure Cloudflare API access and retry before deleting the site.`);
+    return flashRedirect(c, P(c, `/sites/${site.id}`), 'err', `CMS resources were not fully deleted: ${String((err as Error)?.message ?? err).slice(0, 240)} Open System → Cloudflare, reconnect the account, then delete the site again.`);
   }
   // Remove stored files before the rows that point at them.
   const media = await all<any>(c.env.DB, 'SELECT key FROM media WHERE site_id=?', [site.id]);

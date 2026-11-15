@@ -115,18 +115,38 @@ Each new CMS site is deployed automatically; its first visit to `/install` is
 where you create that site's CMS login. Static sites can still be created by
 choosing the static kind.
 
-1. Build the reusable template once (Node.js, npm, `curl`, and `tar` required):
-   `npm run cms:template:build`.
-2. Set `CF_ACCOUNT_ID` and `CF_API_TOKEN` as secrets on the panel Worker. The
-token needs Workers Scripts edit, D1 edit, KV edit, and Workers account settings
-read permissions. Do not put the token in source control or send it in chat.
-3. Upload the built master to the panel's KV once from a trusted machine:
-   `CF_ACCOUNT_ID=... CF_API_TOKEN=... npm run cms:template:upload`.
-   The helper finds the panel namespace named `hosting-panel-cms-kv`; if yours
-   has another title, set `PANEL_KV_NAMESPACE_ID` too.
-4. Create a CMS site in the panel. Its independent Worker and storage are
-   provisioned from KV; finish installation at `https://<site-domain>/install`
-   and then sign in at `https://<site-domain>/admin-panel`.
+**All of this is done from the panel at System → Cloudflare**, no terminal
+required once the template is built:
+
+1. Create an API token in Cloudflare (**My Profile → API Tokens → Create Token →
+   Custom token**) with Workers Scripts:Edit, D1:Edit, KV Storage:Edit, and
+   Account Settings:Read for the account that will host the sites.
+2. Open **System → Cloudflare**, paste the account ID and the token, and press
+   *Save & verify*. The panel checks the token, the account and the workers.dev
+   subdomain before storing anything. The token is sealed with AES-GCM: the key
+   lives in KV, only the ciphertext in D1, and it never appears in the audit log,
+   page source, or error messages. Creating the token just for this panel and
+   revoking it later cuts access off instantly.
+3. Nothing to build: the panel downloads the prebuilt CMS module from
+   `templates/cms-template-worker.js` on the first deployment and caches it in
+   its KV for every later site. To pin your own build instead, run
+   `npm run cms:template:build` and upload `dist/cms-template-worker.js` on that
+   page (or `CF_ACCOUNT_ID=... CF_API_TOKEN=... npm run cms:template:upload`;
+   the helper finds the KV namespace titled `hosting-panel-cms-kv`, otherwise
+   set `PANEL_KV_NAMESPACE_ID`). After a CMS upgrade, rebuild and run
+   `npm run cms:template:refresh` to update the committed copy.
+4. Create a CMS site. Its Worker, D1 database, KV namespace and cron are
+   provisioned from the cached template; finish installation at
+   `https://<site-domain>/install`, then sign in at
+   `https://<site-domain>/admin-panel`.
+
+Sites created before the connection existed are listed on the Cloudflare page
+with the reason they failed and a single *Retry* button, so a half-finished
+setup is recoverable instead of a dead end.
+
+Prefer Worker secrets? `CF_ACCOUNT_ID` and `CF_API_TOKEN` set with
+`wrangler secret put` (or the dashboard) take precedence over anything saved in
+the panel and keep the token out of the database entirely.
 
 `CF_API_TOKEN` is highly privileged: only site owners/admins can trigger
 provisioning, and deleting a managed site also deletes its child Worker, D1

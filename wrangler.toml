@@ -28,10 +28,18 @@ binding = "KV"
 [triggers]
 crons = ["*/10 * * * *"]
 
-# Automatic per-site CMS deployments require these runtime settings:
-#   CF_ACCOUNT_ID  -> Worker variable or secret
-#   CF_API_TOKEN   -> Worker secret (Workers Scripts, D1, KV edit + account settings read)
-# Upload the built CMS template once to the bound KV namespace as cms/template-v1.
+# Automatic per-site CMS deployments. Two ways to configure, in priority order:
+#   1. System -> Cloudflare in the panel: paste the account ID and an API token
+#      (Workers Scripts edit, D1 edit, KV edit, account settings read). The token
+#      is stored AES-GCM sealed - key in KV, ciphertext in D1 - and the panel also
+#      accepts dist/cms-template-worker.js as an upload.
+#   2. Worker secrets, preferred for production because nothing is stored in D1:
+#        CF_ACCOUNT_ID  -> Worker variable or secret
+#        CF_API_TOKEN   -> Worker secret (Workers Scripts, D1, KV edit + account
+#                          settings read)
+#      The CMS template is downloaded once from templates/cms-template-worker.js
+#      in this repository and cached in the bound KV namespace as
+#      cms/template-v1; CMS_TEMPLATE_URL overrides where it comes from.
 
 # Optional custom domain for the panel itself.
 # [[routes]]
