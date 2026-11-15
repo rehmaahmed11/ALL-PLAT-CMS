@@ -35,6 +35,7 @@ src/
 ├── scripts/
 │   ├── bundle.mjs          `npm run build`: regenerate schema + bundle check into dist/
 │   ├── build-schema.mjs    schema.sql → schema.generated.ts
+│   ├── adopt-resources.mjs postinstall: adopt existing KV/D1 ids into wrangler.toml
 │   └── make-bundle.mjs     zip a folder into an uploadable site bundle
 ├── wrangler.toml
 └── package.json
@@ -61,15 +62,19 @@ npx wrangler secret put PANEL_SETUP_TOKEN   # optional, strongly recommended
 npx wrangler deploy
 ```
 
-Wrangler may create the D1 database and KV namespace on the first run. If
-provisioning fails with `a namespace with this account ID and title already
-exists` (code `10014`), the KV namespace exists but Wrangler cannot adopt it
-without its ID. Run `npx wrangler kv namespace list` and
-`npx wrangler d1 list`, then set the existing KV namespace's `id` and the D1
-database's `database_id` in `wrangler.toml` (the D1 list calls it `uuid`). See
-[`docs/DEPLOY.md`](docs/DEPLOY.md) for the exact config entries. Then rerun the
-deploy. Open `https://<your-worker>.workers.dev/_panel` and complete the
-installer.
+Wrangler creates the D1 database and KV namespace on the first run. If they
+already exist — typically after a partially completed first deploy — every
+redeploy would fail with `a namespace with this account ID and title already
+exists` (code `10014`). To prevent that, `npm install` runs
+`scripts/adopt-resources.mjs` (postinstall): with whatever Cloudflare
+credentials are available it lists the account's resources and writes the
+existing KV namespace `id` and D1 `database_id` into `wrangler.toml` before
+the deploy command runs, so Wrangler skips provisioning entirely. The step
+is best-effort — without login it leaves the file alone and the install
+still succeeds. To do it by hand instead, run `npx wrangler kv namespace
+list` and `npx wrangler d1 list` and paste the IDs yourself; see
+[`docs/DEPLOY.md`](docs/DEPLOY.md) for the exact config entries. Open
+`https://<your-worker>.workers.dev/_panel` and complete the installer.
 
 Tested bundle: **254 KiB uploaded, 64 KiB gzipped** — well inside the free
 Worker size limit.

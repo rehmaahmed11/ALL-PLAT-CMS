@@ -12,7 +12,10 @@ workers_dev = true
 
 # ---------------------------------------------------------------------------
 # Storage: all free-plan resources. No R2 (needs a card), no paid plans.
-# `wrangler deploy` creates the D1 database and KV namespace on first deploy.
+# On first deploy wrangler creates whatever is missing. To stop it re-creating
+# resources that already exist (KV error 10014), scripts/adopt-resources.mjs
+# runs at `npm install` (postinstall) and writes the existing `database_id`
+# and KV `id` below whenever Cloudflare credentials are available.
 # ---------------------------------------------------------------------------
 [[d1_databases]]
 binding = "DB"
