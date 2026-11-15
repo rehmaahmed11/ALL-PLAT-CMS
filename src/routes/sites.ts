@@ -148,7 +148,7 @@ export const newForm: Handler = async (c) => {
           <ul class="muted" style="font-size:.84rem;padding-left:18px;margin:0">
             <li>upload a static zip bundle and serve it instantly,</li>
             <li>proxy to your existing Node CMS,</li>
-            <li>or run the original <span class="mono">ahmed-panel.mjs</span> locally for DB isolation.</li>
+            <li>or run your Node CMS origin locally for DB isolation.</li>
           </ul>
         </div>
         <button class="btn primary" style="width:100%;padding:11px">Create site</button>

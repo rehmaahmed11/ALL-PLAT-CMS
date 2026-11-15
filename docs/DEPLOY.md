@@ -5,7 +5,6 @@ Three paths, from quickest to most controlled.
 ## A. Zero-configuration free deploy
 
 ```bash
-cd cloud-panel
 npm install
 npx wrangler login
 npx wrangler deploy
