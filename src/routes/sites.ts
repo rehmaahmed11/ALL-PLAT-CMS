@@ -14,6 +14,7 @@ import { generatePassword, slugToken } from '../lib/crypto.ts';
 import { audit } from '../lib/audit.ts';
 import { errText } from '../lib/runtime.ts';
 import { serveBundlePath } from './public.ts';
+import { deleteCmsInstance, getCmsInstance, provisionCms } from '../lib/cms-provision.ts';
 
 function flash(c: Ctx): Ctx {
   consumeFlash(c, parseCookies(c.req.headers.get('cookie')));
@@ -103,10 +104,10 @@ export const newForm: Handler = async (c) => {
               <p class="hint">Only used inside the panel.</p></div>
             <div class="field"><label>Kind</label>
               <select name="kind">
-                <option value="cms">CMS (Node / Hono origin)</option>
-                <option value="node">Static bundle / proxy</option>
+                <option value="cms">AMS CMS (isolated Worker)</option>
+                <option value="node">Static bundle / external proxy</option>
               </select>
-              <p class="hint">CMS sites get DB credentials and health defaults.</p></div>
+              <p class="hint">CMS sites are deployed from the cached template with separate D1 and KV storage.</p></div>
           </div>
           <div class="field"><label>Primary hostname</label>
             <input type="text" name="host" placeholder="blog.example.com" autocapitalize="none" value="${q(c, 'host')}">
@@ -114,16 +115,10 @@ export const newForm: Handler = async (c) => {
         </div>
 
         <div class="card">
-          <h2>Origin &amp; health</h2>
-          <div class="field"><label>Origin URL (optional)</label>
-            <input type="url" name="nodeUrl" placeholder="https://origin.example.net:3000" value="${q(c, 'nodeUrl')}">
-            <p class="hint">If set, the Worker proxies this host's traffic to that Node origin. Leave blank to serve an uploaded static bundle instead.</p></div>
-          <div class="field"><label>Health check URL (optional)</label>
-            <input type="url" name="healthUrl" placeholder="https://blog.example.com/api/health" value="${q(c, 'healthUrl')}">
-            <p class="hint">Defaults to <span class="mono">https://&lt;primary host&gt;/api/health</span>, matching the AMS CMS.</p></div>
-          <div class="field"><label>Git repository (optional)</label>
-            <input type="text" name="repo" placeholder="rizwanahmedsora9-pixel/ams-builds.online" value="${q(c, 'repo')}">
-            <p class="hint">Recorded for reference so deployments can be traced to a commit source.</p></div>
+          <h2>Automatic CMS deployment</h2>
+          <p class="muted" style="font-size:.84rem">CMS sites reuse the cached build from the AMS CMS repository. Each site receives its own Worker, D1 database and KV namespace; its admin URL is <span class="mono">/admin-panel</span>.</p>
+          <input type="hidden" name="repo" value="https://github.com/rizwanahmedsora9-pixel/ams-builds.online">
+          <p class="hint">The master template is built and cached once. New websites do not download the repository again. Configure Cloudflare provisioning and upload the master template once before creating CMS sites.</p>
         </div>
 
         <div class="card">
@@ -136,20 +131,15 @@ export const newForm: Handler = async (c) => {
         <div class="card">
           <h3>What gets created</h3>
           <div class="col" style="gap:9px;font-size:.86rem">
-            <div class="row" style="gap:8px"><span style="color:var(--ok)">${raw(icons.check)}</span>A random admin slug (<span class="mono">admin-xxxxxx</span>)</div>
-            <div class="row" style="gap:8px"><span style="color:var(--ok)">${raw(icons.check)}</span>A 24-character <span class="mono">DB_PASSWORD</span> env var</div>
+            <div class="row" style="gap:8px"><span style="color:var(--ok)">${raw(icons.check)}</span>Admin URL <span class="mono">/admin-panel</span></div>
+            <div class="row" style="gap:8px"><span style="color:var(--ok)">${raw(icons.check)}</span>A dedicated CMS Worker, D1 database and KV namespace</div>
             <div class="row" style="gap:8px"><span style="color:var(--ok)">${raw(icons.check)}</span>A primary domain record with a TXT verify token</div>
             <div class="row" style="gap:8px"><span style="color:var(--ok)">${raw(icons.check)}</span>Audit entries for every later change</div>
           </div>
         </div>
         <div class="card">
-          <h3>Deploy options</h3>
-          <p class="muted" style="font-size:.84rem">After creating the site you can:</p>
-          <ul class="muted" style="font-size:.84rem;padding-left:18px;margin:0">
-            <li>upload a static zip bundle and serve it instantly,</li>
-            <li>proxy to your existing Node CMS,</li>
-            <li>or run your Node CMS origin locally for DB isolation.</li>
-          </ul>
+          <h3>Before first CMS deployment</h3>
+          <p class="muted" style="font-size:.84rem">Build and upload the CMS template once, and configure <span class="mono">CF_ACCOUNT_ID</span> plus the <span class="mono">CF_API_TOKEN</span> Worker secret. Each site then gets isolated storage and a fresh CMS install wizard.</p>
         </div>
         <button class="btn primary" style="width:100%;padding:11px">Create site</button>
       </div>
@@ -164,18 +154,28 @@ export const create: Handler = async (c) => {
   if (csrf) return csrf;
   const f = c.form!;
   try {
+    const kind = String(f.get('kind') ?? 'cms') === 'node' ? 'node' : 'cms';
     const site = await createSite(c.env.DB, {
       name: String(f.get('name') ?? ''),
-      kind: (String(f.get('kind') ?? 'cms') === 'node' ? 'node' : 'cms'),
+      kind,
       primaryHost: String(f.get('host') ?? ''),
-      nodeUrl: String(f.get('nodeUrl') ?? '').trim(),
-      healthUrl: String(f.get('healthUrl') ?? '').trim(),
-      repo: String(f.get('repo') ?? '').trim(),
+      adminSlug: kind === 'cms' ? 'admin-panel' : undefined,
+      repo: kind === 'cms' ? 'https://github.com/rizwanahmedsora9-pixel/ams-builds.online' : '',
       notes: String(f.get('notes') ?? '').trim(),
       ownerId: c.user!.id,
     });
     await audit(c, 'site.create', 'site', site.id, { name: site.name, host: site.primary_host });
-    return flashRedirect(c, P(c, `/sites/${site.id}`), 'ok', `Site "${site.name}" created. Copy the credentials below before leaving the page.`);
+    if (kind === 'cms') {
+      try {
+        await provisionCms(c.env, site);
+        await audit(c, 'cms.provision', 'site', site.id, { status: 'active' });
+        return flashRedirect(c, P(c, `/sites/${site.id}`), 'ok', `Site created and its isolated CMS deployed. Finish first-time setup at ${site.primary_host ? `https://${site.primary_host}/install` : 'the worker URL + /install'}, then sign in at /admin-panel.`);
+      } catch (err) {
+        await audit(c, 'cms.provision', 'site', site.id, { status: 'error', error: String((err as Error)?.message ?? err).slice(0, 200) });
+        return flashRedirect(c, P(c, `/sites/${site.id}`), 'err', `Site created, but CMS auto-deployment needs setup: ${String((err as Error)?.message ?? err).slice(0, 220)}`);
+      }
+    }
+    return flashRedirect(c, P(c, `/sites/${site.id}`), 'ok', `Site "${site.name}" created.`);
   } catch (err) {
     const msg = err instanceof ValidationError ? err.message : errText(err);
     return flashRedirect(c, P(c, '/sites/new'), 'err', msg);
@@ -202,6 +202,7 @@ export const detail: Handler = async (c) => {
   ]);
   const uptime = await uptimeFor(c.env.DB, site.id, 40);
   const active = deps.find((d) => d.status === 'active');
+  const cmsInstance = site.kind === 'cms' ? await getCmsInstance(c.env.DB, site.id) : null;
   const tab = q(c, 'tab', 'overview');
 
   const tabs = [
@@ -304,7 +305,7 @@ export const detail: Handler = async (c) => {
           </div>
           <dl class="kv" style="margin-top:14px">
             <dt>Slug</dt><dd class="mono">${site.slug}</dd>
-            <dt>Kind</dt><dd>${site.kind === 'cms' ? 'CMS (Node origin)' : 'Static bundle'}</dd>
+            <dt>Kind</dt><dd>${site.kind === 'cms' ? 'AMS CMS (isolated Worker)' : 'Static bundle / proxy'}</dd>
             <dt>Primary host</dt><dd class="mono">${site.primary_host || '—'}</dd>
             <dt>Admin path</dt><dd class="mono">https://${site.primary_host || 'your-host'}/${site.admin_slug}</dd>
             <dt>Origin</dt><dd class="mono">${origin || 'served from KV bundle'}</dd>
@@ -338,12 +339,12 @@ export const detail: Handler = async (c) => {
               <div class="field"><label>Name</label><input type="text" name="name" value="${site.name}" required></div>
               <div class="field"><label>Primary host</label><input type="text" name="primary_host" value="${site.primary_host}" autocapitalize="none"></div>
             </div>
-            <div class="field"><label>Admin slug</label><input type="text" name="admin_slug" value="${site.admin_slug}" pattern="[a-z0-9][a-z0-9\\-]{2,40}">
-              <p class="hint">Changing this immediately changes the CMS admin path.</p></div>
-            <div class="field"><label>Origin URL</label><input type="url" name="node_url" value="${site.node_url}" placeholder="https://origin.example.net"></div>
+            <div class="field"><label>Admin slug</label><input type="text" name="admin_slug" value="${site.admin_slug}" pattern="[a-z0-9][a-z0-9\\-]{2,40}"${site.kind === 'cms' ? raw(' readonly') : ''}>
+              <p class="hint">${site.kind === 'cms' ? 'The AMS CMS template uses the fixed /admin-panel path.' : 'Changing this immediately changes the CMS admin path.'}</p></div>
+            <div class="field"><label>${site.kind === 'cms' ? 'Provisioned CMS Worker origin' : 'Origin URL'}</label><input type="url" name="node_url" value="${site.node_url}" placeholder="https://origin.example.net"${site.kind === 'cms' ? raw(' readonly') : ''}></div>
             <div class="form-grid">
               <div class="field"><label>Health URL</label><input type="url" name="health_url" value="${site.health_url}"></div>
-              <div class="field"><label>Git repository</label><input type="text" name="repo" value="${site.repo}"></div>
+              <div class="field"><label>Git repository</label><input type="text" name="repo" value="${site.repo}"${site.kind === 'cms' ? raw(' readonly') : ''}></div>
             </div>
             <div class="field"><label>Notes</label><textarea name="notes">${site.notes}</textarea></div>
             <button class="btn primary">Save changes</button>
@@ -352,14 +353,31 @@ export const detail: Handler = async (c) => {
       </div>
 
       <div class="stack">
+        ${site.kind === 'cms' ? h`<div class="card">
+          <h3>Isolated CMS deployment</h3>
+          ${cmsInstance?.status === 'active'
+            ? h`<p class="muted" style="font-size:.84rem">Deployed from the cached AMS CMS template. This site has its own Worker, D1 database and KV namespace.</p>
+                <p class="mono" style="font-size:.82rem">Worker: ${cmsInstance.worker_name}</p>
+                <div class="actions">
+                  <a class="btn sm" href="${site.primary_host ? `https://${site.primary_host}/install` : `${cmsInstance.worker_url}/install`}" target="_blank" rel="noopener">Open installer</a>
+                  <a class="btn sm ghost" href="${site.primary_host ? `https://${site.primary_host}/admin-panel` : `${cmsInstance.worker_url}/admin-panel`}" target="_blank" rel="noopener">Open /admin-panel</a>
+                </div>`
+            : h`<p class="muted" style="font-size:.84rem">${cmsInstance?.status === 'error' ? `Deployment failed: ${cmsInstance.error}` : 'Not deployed yet. This needs the cached CMS template and Cloudflare provisioning credentials.'}</p>
+                ${cmsInstance?.status === 'provisioning' ? h`<span class="badge warn">Provisioning</span>` : ''}
+                <form method="post" action="${P(c, `/sites/${site.id}/cms-provision`)}" style="margin-top:10px">${csrfInput(c)}
+                  <button class="btn sm primary">${cmsInstance ? 'Retry CMS deployment' : 'Deploy CMS'}</button></form>`}
+        </div>` : ''}
         <div class="card">
-          <h3>Credentials</h3>
-          <p class="hint" style="margin-bottom:10px">Generated at creation. Rotate to invalidate the old values immediately.</p>
-          <div class="field"><label>Cron / reinstall password (DB_PASSWORD)</label>${copyBox(site.db_password || 'not set')}</div>
-          <div class="field"><label>Admin path</label>${copyBox(`/${site.admin_slug}`)}</div>
-          <form method="post" action="${P(c, `/sites/${site.id}/credentials`)}">${csrfInput(c)}
-            <button class="btn sm" data-confirm="Rotate DB_PASSWORD and the admin slug? Running sites will need the new values.">${raw(icons.refresh)} Rotate both</button>
-          </form>
+          <h3>${site.kind === 'cms' ? 'CMS access' : 'Credentials'}</h3>
+          ${site.kind === 'cms'
+            ? h`<p class="hint">The CMS admin account is created in its first-run installer. The site admin URL is fixed at /admin-panel.</p>
+                <div class="field"><label>Admin path</label>${copyBox('/admin-panel')}</div>`
+            : h`<p class="hint" style="margin-bottom:10px">Generated at creation. Rotate to invalidate the old values immediately.</p>
+                <div class="field"><label>Cron / reinstall password (DB_PASSWORD)</label>${copyBox(site.db_password || 'not set')}</div>
+                <div class="field"><label>Admin path</label>${copyBox(`/${site.admin_slug}`)}</div>
+                <form method="post" action="${P(c, `/sites/${site.id}/credentials`)}">${csrfInput(c)}
+                  <button class="btn sm" data-confirm="Rotate DB_PASSWORD and the admin slug? Running sites will need the new values.">${raw(icons.refresh)} Rotate both</button>
+                </form>`}
         </div>
 
         <div class="card">
@@ -414,14 +432,33 @@ export const edit: Handler = async (c) => {
     patch.primary_host = host;
   }
   const slug = String(f.get('admin_slug') ?? '').trim().toLowerCase();
-  if (slug && /^[a-z0-9][a-z0-9-]{2,40}$/.test(slug)) patch.admin_slug = slug;
-  patch.node_url = String(f.get('node_url') ?? '').trim();
+  if (site.kind !== 'cms' && slug && /^[a-z0-9][a-z0-9-]{2,40}$/.test(slug)) patch.admin_slug = slug;
+  if (site.kind !== 'cms') patch.node_url = String(f.get('node_url') ?? '').trim();
   patch.health_url = String(f.get('health_url') ?? '').trim();
-  patch.repo = String(f.get('repo') ?? '').trim();
+  patch.repo = site.kind === 'cms' ? 'https://github.com/rizwanahmedsora9-pixel/ams-builds.online' : String(f.get('repo') ?? '').trim();
   patch.notes = String(f.get('notes') ?? '').trim();
   await updateSite(c.env.DB, site.id, patch);
   await audit(c, 'site.update', 'site', site.id, patch);
   return flashRedirect(c, P(c, `/sites/${site.id}`), 'ok', 'Site updated.');
+};
+
+export const provisionCmsSite: Handler = async (c) => {
+  const gate = requireAdmin(c);
+  if (gate) return gate;
+  const csrf = csrfGuard(c);
+  if (csrf) return csrf;
+  const site = await getSite(c.env.DB, c.params.id);
+  if (!site) return flashRedirect(c, P(c, '/sites'), 'err', 'Site not found.');
+  if (site.kind !== 'cms') return flashRedirect(c, P(c, `/sites/${site.id}`), 'err', 'Automatic CMS deployment is only available for CMS sites.');
+  try {
+    const instance = await provisionCms(c.env, site);
+    await audit(c, 'cms.provision', 'site', site.id, { status: instance.status, worker: instance.worker_name });
+    return flashRedirect(c, P(c, `/sites/${site.id}`), 'ok', 'CMS Worker deployed. Complete the installer on the site, then use /admin-panel.');
+  } catch (err) {
+    const message = String((err as Error)?.message ?? err).slice(0, 300);
+    await audit(c, 'cms.provision', 'site', site.id, { status: 'error', error: message });
+    return flashRedirect(c, P(c, `/sites/${site.id}`), 'err', `CMS deployment failed: ${message}`);
+  }
 };
 
 export const setStatus: Handler = async (c) => {
@@ -461,6 +498,7 @@ export const rotateCredentials: Handler = async (c) => {
   if (csrf) return csrf;
   const site = await getSite(c.env.DB, c.params.id);
   if (!site) return flashRedirect(c, P(c, '/sites'), 'err', 'Site not found.');
+  if (site.kind === 'cms') return flashRedirect(c, P(c, `/sites/${site.id}`), 'err', 'CMS login credentials are managed in the CMS installer and admin panel.');
   const newPass = generatePassword(24);
   const newSlug = `admin-${slugToken(6)}`;
   await run(c.env.DB, 'UPDATE sites SET db_password=?, admin_slug=?, updated_at=? WHERE id=?', [newPass, newSlug, Date.now(), site.id]);
@@ -483,6 +521,11 @@ export const remove: Handler = async (c) => {
   if (csrf) return csrf;
   const site = await getSite(c.env.DB, c.params.id);
   if (!site) return flashRedirect(c, P(c, '/sites'), 'err', 'Site not found.');
+  try {
+    await deleteCmsInstance(c.env, site.id);
+  } catch (err) {
+    return flashRedirect(c, P(c, `/sites/${site.id}`), 'err', `CMS resources were not fully deleted: ${String((err as Error)?.message ?? err).slice(0, 240)}. Configure Cloudflare API access and retry before deleting the site.`);
+  }
   // Remove stored files before the rows that point at them.
   const media = await all<any>(c.env.DB, 'SELECT key FROM media WHERE site_id=?', [site.id]);
   const deps = await all<any>(c.env.DB, 'SELECT key FROM deployments WHERE site_id=?', [site.id]);
