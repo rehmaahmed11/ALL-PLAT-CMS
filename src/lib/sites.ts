@@ -123,8 +123,8 @@ export async function createSite(db: any, input: CreateSiteInput): Promise<Site>
       [id('dom'), site.id, site.primary_host, 'primary', 'active', slugToken(16), now],
     ]);
   }
-  // Every CMS site starts with an env var set matching the local CLI panel's
-  // install flow, so a local Node process can pick it up unchanged.
+  // Every CMS site starts with a DB_PASSWORD env var, so a local Node
+  // process can pick it up unchanged.
   statements.push([
     'INSERT INTO envvars (id,site_id,key,value,secret,updated_at) VALUES (?,?,?,?,?,?)',
     [id('env'), site.id, 'DB_PASSWORD', site.db_password, 1, now],

@@ -4,14 +4,12 @@ A multi-site hosting control panel + lightweight CMS, built as a single Cloudfla
 Worker. No servers, no R2 bucket, no credit card: **D1 + KV only**, both of which
 the free plan includes.
 
-It is the web-GUI successor to the `ahmed-panel-*` CLI scripts in the repo root:
-everything those scripts do from a terminal menu — provision sites, hand out
-credentials, verify DNS, back up and restore, update and roll back bundles,
-health-check the fleet — is now a proper panel with an audit trail, roles and an
-API.
+It provisions sites, hands out credentials, verifies DNS, backs up and
+restores, updates and rolls back bundles, and health-checks the fleet — all
+from a proper panel with an audit trail, roles and an API.
 
 ```
-cloud-panel/
+src/
 ├── src/
 │   ├── index.ts            Worker entry: install gate → panel dispatch → site serving
 │   ├── types.ts            Erasable TypeScript types shared by every runtime
@@ -42,7 +40,6 @@ cloud-panel/
 ## Run it locally (no Cloudflare account)
 
 ```bash
-cd cloud-panel
 npm install
 npm run local            # http://localhost:8787/_panel
 ```
@@ -50,7 +47,7 @@ npm run local            # http://localhost:8787/_panel
 Node 22.18+ runs the TypeScript directly through its built-in type stripping.
 Storage is `node:sqlite` (a D1 look-alike in `local/d1.mjs`) and a folder for KV
 (`local/kv.mjs`), so the *same* worker source serves the preview. Data lands in
-`cloud-panel/local/data/` — delete that folder to start over.
+`local/data/` — delete that folder to start over.
 
 ## Deploy to Cloudflare's free plan
 
@@ -116,9 +113,9 @@ throttling by email and IP, and a 90-day audit log.
 `/_panel/api/overview`, `/api/sites`, `/api/sites/:id/check`,
 `/api/monitor/feed`. There is also `/_panel/healthz` for uptime monitors.
 
-## Suggestions that are built in
+## Design highlights
 
-Things the CLI scripts could not do that a free-plan Worker panel should:
+Built for the free plan:
 
 1. **Host-based multi-tenancy in one Worker.** No per-site process, no Nginx:
    the Host header picks the site, the panel path is reserved.
@@ -156,17 +153,7 @@ The unit tests cover the ZIP reader/writer round-trip, password hashing, site
 validation, DNS verdicts, and the router. The local server is the integration
 test: `npm run local`, install, create a site, upload a bundle, hit the host.
 
-## Relationship to the CLI panel in the repo root
-
-`ahmed-panel.mjs` and the Bash/PowerShell scripts manage *real* machines: Nginx,
-systemd, per-site SQLite files, and Node processes. Those still work and are the
-right tool when you have a VPS. This panel covers the Cloudflare side — the same
-mental model (sites, admin slugs, `DB_PASSWORD`, bundles, backups, DNS checks)
-implemented against D1/KV. A site created here can record the same repo, branch
-and credentials you would hand to `ahmed-panel.mjs`, so the two can coexist.
-
 ## More documentation
 
 - [`docs/DEPLOY.md`](docs/DEPLOY.md) — three deploy paths, custom domains, cron work, updates, cost.
-- [`docs/MIGRATION.md`](docs/MIGRATION.md) — how this maps onto the CLI panels, and what it deliberately cannot do.
 - The panel's own **Docs** page renders the same deployment notes at runtime, with your real hostnames filled in, and can download them as Markdown.
