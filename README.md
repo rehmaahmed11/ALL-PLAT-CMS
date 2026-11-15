@@ -32,7 +32,10 @@ src/
 │   ├── ui/                 design system (CSS, icons, layout, components)
 │   └── routes/             panel pages + JSON API
 ├── local/                  Node preview runtime (sqlite + folder KV)
-├── scripts/build-schema.mjs
+├── scripts/
+│   ├── bundle.mjs          `npm run build`: regenerate schema + bundle check into dist/
+│   ├── build-schema.mjs    schema.sql → schema.generated.ts
+│   └── make-bundle.mjs     zip a folder into an uploadable site bundle
 ├── wrangler.toml
 └── package.json
 ```
