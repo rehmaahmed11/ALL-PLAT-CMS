@@ -33,6 +33,7 @@ import { backupMaster, backupTenant, restoreTenantBackup } from '../backups';
 import { createRenewalInvoice, processTenantExpiries, recordPayment, verifyPayment } from '../billing';
 import { collectServerHealth } from '../monitoring';
 import { fmtBytes, fmtMoney, html, masterCsrfField, masterLayout, masterShell, raw } from '../ui';
+import { PLATFORM_EXIT_PATH, signTenantRoute } from '../tenant-route';
 import type { TenantStorageManager } from '../../platform/tenant-storage';
 import type { PlatformScheduler } from '../../platform/scheduler';
 import type {
@@ -451,7 +452,21 @@ export function createMasterApp(
                       </td>
                       <td><span class="pill ${t.status}">${t.status}</span></td>
                       <td>${t.expires_at ? t.expires_at.slice(0, 10) : '—'}</td>
-                      <td><a class="btn ghost sm" href="/tenants/${t.id}">Manage</a></td>
+                      <td>
+                        <div class="row" style="gap:6px">
+                          <form method="post" action="/tenants/${t.id}/open" style="display:inline">
+                            ${masterCsrfField(c, c.var.csrf)}
+                            <input type="hidden" name="to" value="site">
+                            <button class="btn ghost sm" type="submit" title="Open this tenant's website here">Site</button>
+                          </form>
+                          <form method="post" action="/tenants/${t.id}/open" style="display:inline">
+                            ${masterCsrfField(c, c.var.csrf)}
+                            <input type="hidden" name="to" value="admin">
+                            <button class="btn ghost sm" type="submit" title="Open this tenant's CMS admin here">CMS</button>
+                          </form>
+                          <a class="btn ghost sm" href="/tenants/${t.id}">Manage</a>
+                        </div>
+                      </td>
                     </tr>`;
                   })}
                 </tbody>
@@ -576,7 +591,8 @@ export function createMasterApp(
         allowPendingDnsActivation: true,
       });
       return go(`/tenants/${result.tenantId}`, {
-        ok: `Tenant ${result.tenantId} provisioned and active (${result.domain}).`,
+        ok: `Website is live on ${result.domain}. Use Open Website or Open CMS Admin to enter it now — `
+          + `the customer signs in at ${result.adminUrl} with the CMS username and password you just set.`,
       });
     } catch (err) {
       return go('/tenants/new', { err: err instanceof Error ? err.message : String(err) });
@@ -612,13 +628,39 @@ export function createMasterApp(
             <div class="hint">ID: <code>${tenant.id}</code> · Customer: ${tenant.customer_name} (${tenant.customer_email})</div>
           </div>
           <div class="row">
-            ${primary ? html`<a class="btn ghost" href="https://${primary.hostname}" target="_blank" rel="noopener">Open Public Site</a>` : ''}
-            ${primary ? html`<a class="btn ghost" href="https://${primary.hostname}/${tenant.admin_slug}" target="_blank" rel="noopener">Open /${tenant.admin_slug}</a>` : ''}
+            <form method="post" action="/tenants/${tenant.id}/open" style="display:inline">
+              ${masterCsrfField(c, c.var.csrf)}
+              <input type="hidden" name="to" value="site">
+              <button class="btn" type="submit">Open Website</button>
+            </form>
+            <form method="post" action="/tenants/${tenant.id}/open" style="display:inline">
+              ${masterCsrfField(c, c.var.csrf)}
+              <input type="hidden" name="to" value="admin">
+              <button class="btn ok" type="submit">Open CMS Admin</button>
+            </form>
+            ${primary ? html`<a class="btn ghost" href="https://${primary.hostname}" target="_blank" rel="noopener">${primary.hostname} &nearr;</a>` : ''}
             <a class="btn ghost" href="/tenants">&larr; All Tenants</a>
           </div>
         </div>
 
         ${tenant.provisioning_error ? html`<div class="flash err">Provisioning error (step ${tenant.provisioning_step}): ${tenant.provisioning_error}</div>` : ''}
+
+        <div class="card">
+          <h2>Website &amp; CMS Access</h2>
+          <table>
+            <tr><th>Website</th><td><code>${primary ? `https://${primary.hostname}` : '(no domain assigned yet)'}</code></td></tr>
+            <tr><th>CMS admin</th><td><code>${primary ? `https://${primary.hostname}/${tenant.admin_slug}` : `/${tenant.admin_slug}`}</code></td></tr>
+            <tr><th>Provisioning</th><td>Step ${tenant.provisioning_step} / ${PROVISIONING_STEPS.length}${tenant.status === 'active' ? ' — complete' : ''}</td></tr>
+          </table>
+          <p class="hint">
+            <b>Open Website</b> and <b>Open CMS Admin</b> load this tenant on the panel's own address, so a
+            freshly provisioned website is usable before the customer's DNS points here — and on a host that
+            serves no per-tenant DNS at all. The tenant's CMS still asks for that tenant's own administrator
+            password; there is no backdoor account. Leave with
+            <a href="${PLATFORM_EXIT_PATH}">Exit to hosting panel</a>, or use the bar shown at the foot of the
+            website. The customer's own domain above is the address to give them.
+          </p>
+        </div>
 
         <div class="grid2">
           <div class="card">
@@ -753,6 +795,46 @@ export function createMasterApp(
           </div>
         </div>
       `,
+    });
+  });
+
+  /**
+   * Opens one tenant's website — or its CMS admin — on the panel's own host.
+   *
+   * A tenant normally lives on its own hostname, which needs the customer's DNS
+   * to point here first. This mints the signed, short-lived route the runtime
+   * honours (`src/master/tenant-route.ts`), so a website is usable the moment it
+   * is provisioned, and on a host that serves no per-tenant DNS at all.
+   *
+   * It routes the browser; it does not log anybody in. The tenant's CMS still
+   * asks for that tenant's own administrator password, so there is no backdoor
+   * into a customer site — the owner leaves with **Exit to hosting panel**, and
+   * every open is written to the audit log.
+   */
+  app.post('/tenants/:id/open', (c) => {
+    const id = c.req.param('id');
+    const tenant = master.db
+      .prepare("SELECT id, site_name, admin_slug FROM tenants WHERE id=? AND status <> 'deleted'")
+      .get(id) as { id: string; site_name: string; admin_slug: string } | undefined;
+    if (!tenant) return go('/tenants', { err: 'Tenant not found.' });
+    const toAdmin = String(c.var.form.get('to') ?? '') === 'admin';
+    const secure = new URL(c.req.url).protocol === 'https:';
+    const { cookie } = signTenantRoute(master.masterKey, tenant.id, { secure });
+    logMasterAudit(master.db, {
+      actorId: c.var.masterUser.id,
+      action: 'tenant.opened',
+      targetType: 'tenant',
+      targetId: tenant.id,
+      summary: `Opened "${tenant.site_name}" ${toAdmin ? 'CMS admin' : 'website'} through the hosting panel`,
+      ip: c.var.clientIp,
+    });
+    return new Response(null, {
+      status: 303,
+      headers: {
+        Location: toAdmin ? `/${tenant.admin_slug}` : '/',
+        'Cache-Control': 'no-store',
+        'Set-Cookie': cookie,
+      },
     });
   });
 

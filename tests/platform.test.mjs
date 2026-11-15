@@ -612,3 +612,161 @@ test('Phase 11: Concurrency & load test across tenants and Master Panel', async 
     if (i % 3 === 2) assert.ok(results[i].text.includes('Ahmed Hosting Panel'));
   }
 });
+
+test('Phase 12: Tenant access channel — the panel opens a tenant website and CMS, real domains still win', async () => {
+  const panel = makeHostClient(MASTER_HOST);
+  const loginPage = await panel.req('/login');
+  const login = await panel.postForm('/login', {
+    login: 'ahmed',
+    password: 'MasterPass!2026',
+    _csrf: panel.extractCsrf(loginPage.text),
+  });
+  assert.equal(login.status, 303, 'owner signs into the hosting panel');
+
+  // 1. The tenant page offers both doors and says where the customer will sign in.
+  const tenantPage = await panel.req(`/tenants/${tenantA.tenantId}`);
+  assert.equal(tenantPage.status, 200);
+  assert.ok(tenantPage.text.includes('Open Website'), 'the tenant page offers Open Website');
+  assert.ok(tenantPage.text.includes('Open CMS Admin'), 'the tenant page offers Open CMS Admin');
+  assert.ok(tenantPage.text.includes('Website &amp; CMS Access'), 'the tenant page shows the access card');
+
+  // 2. Opening a tenant is a state-changing master action, so it needs the CSRF token.
+  const noCsrf = await panel.postForm(`/tenants/${tenantA.tenantId}/open`, { to: 'admin', _csrf: 'forged' });
+  assert.equal(noCsrf.status, 403, 'a forged CSRF token cannot open a tenant');
+
+  // 3. Open the tenant's CMS on the panel's own host.
+  const open = await panel.postForm(`/tenants/${tenantA.tenantId}/open`, { to: 'admin' }, `/tenants/${tenantA.tenantId}`);
+  assert.equal(open.status, 303);
+  assert.equal(open.location, '/alpha-admin', 'the owner lands on the tenant CMS, not the master panel');
+  const routeCookie = open.headers.getSetCookie().find((ck) => ck.startsWith('platform_tenant='));
+  assert.ok(routeCookie, 'a signed tenant route cookie is set');
+  assert.ok(/HttpOnly/i.test(routeCookie), 'the route cookie is HttpOnly');
+  assert.ok(/SameSite=Lax/i.test(routeCookie), 'the route cookie is SameSite');
+
+  // 4. The panel host now answers as that tenant: its CMS, its content, and a bar
+  //    saying so, so the owner is never looking at a customer site without knowing.
+  const cmsLogin = await panel.req('/alpha-admin/login');
+  assert.equal(cmsLogin.status, 200);
+  assert.ok(!cmsLogin.text.includes('Ahmed Hosting Panel'), 'this is the tenant CMS, not the master panel');
+
+  const site = await panel.req('/alpha-secret');
+  assert.equal(site.status, 200);
+  assert.ok(site.text.includes('Confidential Alpha Data'), "tenant A's own page is served through the channel");
+  assert.ok(
+    site.text.includes(`data-platform-tenant-route="${tenantA.tenantId}"`),
+    'the preview bar names the tenant being previewed',
+  );
+  assert.ok(site.text.includes('Exit to hosting panel'), 'the preview bar offers a way out');
+
+  // 5. Absolute URLs still name the tenant's real domain, not the panel's host.
+  assert.ok(
+    site.text.includes('canonical" href="https://alpha.example.test/alpha-secret"'),
+    'canonical names the customer domain, not the host the page was reached on',
+  );
+
+  // 6. The channel routes the browser; it does not log anybody in.
+  const wrongLogin = await panel.postForm(
+    '/alpha-admin/login',
+    { login: 'alphaadmin', password: 'wrong-password', _csrf: panel.extractCsrf(cmsLogin.text) },
+  );
+  assert.equal(wrongLogin.status, 303);
+  assert.ok(/err=/.test(wrongLogin.location), 'the tenant CMS refuses a wrong password — no backdoor');
+  const rightLogin = await panel.postForm(
+    '/alpha-admin/login',
+    // Phase 9 reset this tenant's CMS admin password; the channel carries no
+    // session of its own, so the current password is what opens the CMS.
+    { login: 'alphaadmin', password: 'NewAlphaPass!2026', _csrf: panel.extractCsrf(cmsLogin.text) },
+  );
+  assert.equal(rightLogin.status, 303);
+  assert.equal(rightLogin.location, '/alpha-admin');
+  const cmsDash = await panel.req('/alpha-admin');
+  assert.equal(cmsDash.status, 200);
+  assert.ok(!cmsDash.text.includes('Ahmed Hosting Panel'), 'signed into the tenant CMS');
+
+  // 7. A forged or expired route is ignored and the panel comes straight back.
+  const good = panel.cookies.get('platform_tenant');
+  assert.ok(good, 'the route cookie is in the jar');
+  panel.cookies.set('platform_tenant', `${tenantA.tenantId}.${Date.now() + 60_000}.forged-signature`);
+  assert.ok((await panel.req('/')).text.includes('Platform Overview'), 'a forged signature is ignored');
+  panel.cookies.set('platform_tenant', good.replace(/\.(\d+)\./, `.${Date.now() - 1000}.`));
+  assert.ok((await panel.req('/')).text.includes('Platform Overview'), 'an expired route is ignored');
+  panel.cookies.set('platform_tenant', good);
+
+  // 8. The customer's own domain never reads the channel.
+  const customer = makeHostClient('alpha.example.test');
+  const onRealDomain = await customer.req('/alpha-secret');
+  assert.equal(onRealDomain.status, 200);
+  assert.ok(!onRealDomain.text.includes('data-platform-tenant-route'), 'no preview bar on the real domain');
+
+  // 9. Exit returns the owner to the hosting panel and clears the route.
+  const exit = await panel.req('/__platform/exit');
+  assert.equal(exit.status, 303);
+  assert.equal(exit.location, '/');
+  assert.ok(
+    exit.headers.getSetCookie().some((ck) => ck.startsWith('platform_tenant=;') && /Max-Age=0/i.test(ck)),
+    'the route cookie is cleared',
+  );
+  const backHome = await panel.req('/');
+  assert.equal(backHome.status, 200);
+  assert.ok(backHome.text.includes('Platform Overview'), 'the panel is back');
+
+  // 10. A suspended tenant is still held, even through the channel — and the
+  //     holding page still lets the owner out.
+  runtime.master.db.prepare("UPDATE tenants SET status='suspended' WHERE id=?").run(tenantA.tenantId);
+  const reopen = await panel.postForm(`/tenants/${tenantA.tenantId}/open`, { to: 'site' }, `/tenants/${tenantA.tenantId}`);
+  assert.equal(reopen.status, 303);
+  const suspended = await panel.req('/');
+  assert.equal(suspended.status, 503);
+  assert.ok(suspended.text.includes('Website Temporarily Suspended'));
+  assert.ok(suspended.text.includes('/__platform/exit'), 'the holding page still links back to the panel');
+  runtime.master.db.prepare("UPDATE tenants SET status='active' WHERE id=?").run(tenantA.tenantId);
+  await panel.req('/__platform/exit');
+
+  // 11. Every open that actually happened is written to the master audit log —
+  //     and the one refused for a bad CSRF token is not, because it never ran.
+  const opens = runtime.master.db
+    .prepare("SELECT action, summary FROM master_audit_log WHERE action='tenant.opened' ORDER BY id ASC")
+    .all();
+  assert.equal(opens.length, 2, `expected exactly the two real opens to be audited, found ${opens.length}`);
+  assert.ok(opens[0].summary.includes('CMS admin'), 'the first open is recorded as the CMS admin');
+  assert.ok(opens[1].summary.includes('website'), 'the second open is recorded as the website');
+});
+
+test('Phase 13: a proxied request keeps the customer origin, so tenant logins are not refused', async () => {
+  // This is how Cloudflare Tunnel delivers traffic to the Node origin: the
+  // socket URL carries the origin's own host and port, and the customer's
+  // hostname arrives in X-Forwarded-Host. Rewriting the URL must adopt the
+  // hostname *without* dragging the origin's port along, or the CMS's
+  // same-origin check sees `https://customer.com:8787` against an Origin of
+  // `https://customer.com` and refuses every browser POST — including the
+  // tenant's own login, so a provisioned website could never be posted to.
+  const customer = makeHostClient('alpha.example.test');
+  const loginPage = await customer.req('/alpha-admin/login');
+  assert.equal(loginPage.status, 200);
+
+  const headers = new Headers();
+  headers.set('host', '127.0.0.1:8787');
+  headers.set('x-forwarded-host', 'alpha.example.test');
+  headers.set('x-forwarded-proto', 'https');
+  headers.set('x-platform-origin-auth', signOriginAuth(ORIGIN_SECRET, 'alpha.example.test'));
+  headers.set('origin', 'https://alpha.example.test');
+  headers.set('cookie', [...customer.cookies.entries()].map(([k, v]) => `${k}=${v}`).join('; '));
+
+  const fd = new FormData();
+  fd.set('_csrf', customer.extractCsrf(loginPage.text));
+  fd.set('login', 'alphaadmin');
+  fd.set('password', 'NewAlphaPass!2026');
+
+  const res = await runtime.handleRequest(
+    new Request('http://127.0.0.1:8787/alpha-admin/login', {
+      method: 'POST',
+      headers,
+      body: fd,
+      redirect: 'manual',
+    }),
+    '127.0.0.1',
+  );
+  assert.notEqual(res.status, 403, `a browser POST from the customer's own domain must not be refused (got ${res.status})`);
+  assert.equal(res.status, 303);
+  assert.equal(res.headers.get('location'), '/alpha-admin', 'the tenant signs in rather than being bounced with an error');
+});

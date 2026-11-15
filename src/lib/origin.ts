@@ -1,3 +1,12 @@
+import { getPlatformPolicy } from './platform-policy';
+import type { Env } from '../types';
+
+/** The tenant's own primary domain, when this site is one tenant on the platform. */
+function platformPrimaryDomain(env: unknown): string {
+  if (!env || typeof env !== 'object') return '';
+  return getPlatformPolicy(env as Env)?.primaryDomain ?? '';
+}
+
 /**
  * The name a site shows for itself follows the domain it is being viewed on.
  *
@@ -56,4 +65,29 @@ export function displayTitle(stored: string | undefined, host: string): string {
 /** The same decision for a request URL. */
 export function titleFor(stored: string | undefined, url: URL): string {
   return displayTitle(stored, url.host);
+}
+
+/**
+ * The origin a site describes itself with in absolute URLs.
+ *
+ * A standalone site is reached on its own domain, so the request URL is right.
+ * A tenant on the hosting platform is not: the platform owner opens a website
+ * and its CMS through the panel's own host (see the tenant access channel in
+ * `src/platform/server.ts`), and a customer's domain may still be pointing at
+ * the old host while DNS propagates. Canonical links, Open Graph URLs, the
+ * sitemap and the feed must still name the tenant's real primary domain, or
+ * every page the customer publishes tells search engines and social cards that
+ * it lives somewhere else.
+ *
+ * The tenant's domain comes from its platform policy, which the storage manager
+ * attaches to the tenant's `env`; a standalone site has no policy and keeps
+ * using the request URL exactly as before.
+ */
+export function siteOrigin(env: unknown, url: URL): string {
+  const primary = platformPrimaryDomain(env);
+  if (!primary) return url.origin;
+  const host = url.host.toLowerCase();
+  // Already on the real domain (with or without its port): nothing to fix.
+  if (host === primary.toLowerCase() || host === `${primary.toLowerCase()}:${url.port}`) return url.origin;
+  return `https://${primary}`;
 }

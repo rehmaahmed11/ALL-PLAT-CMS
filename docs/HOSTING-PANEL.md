@@ -12,7 +12,9 @@ This document describes the architecture, local operation, verification suite, a
 - **Multi-Tenant Runtime & Storage Pool (`src/platform/`)**:
   - Each tenant gets an isolated SQLite database (`data/tenants/ten_<id>/cms.sqlite`) and upload directory (`data/tenants/ten_<id>/media/`).
   - `TenantStorageManager` enforces strict `ten_[a-z0-9]{10,28}` path containment, bounded LRU SQLite pool (`maxOpen=64`, `idleTtlMs=300_000`), and `WeakMap`-scoped `TenantPolicy` (`src/lib/platform-policy.ts`) locking hosted `/install`, `/tools/reset`, domain/slug edits, and enforcing real-time storage quotas.
-  - `src/platform/server.ts` authenticates forwarded traffic via `X-Platform-Origin-Auth` (HMAC-SHA256 bound to timestamp + hostname, ±60s replay window), routes `MASTER_PANEL_HOST` exclusively to the Master Panel, serves suspended holding pages (`503`) without deleting data, and routes active/grace-period customer hostnames to their isolated tenant CMS env.
+  - `src/platform/server.ts` authenticates forwarded traffic via `X-Platform-Origin-Auth` (HMAC-SHA256 bound to timestamp + hostname, ±60s replay window), routes `MASTER_PANEL_HOST` exclusively to the Master Panel, serves suspended holding pages (`503`) without deleting data, and routes active/grace-period customer hostnames to their isolated tenant CMS env. When it adopts a forwarded hostname it assigns `URL.hostname`/`URL.port` separately rather than `URL.host`, because the `host` setter keeps the port the request arrived on: leaving it attached made the canonical URL `https://customer.com:8787` while the browser's `Origin` was `https://customer.com`, and every browser `POST` — including a tenant's own login — was then refused as cross-site. The incoming port belongs to the host the request arrived on, never to a forwarded one.
+  - **Tenant access channel** (`src/master/tenant-route.ts`): a tenant website normally lives on its own hostname, which needs the customer's DNS to point here first. **Open Website** / **Open CMS Admin** on a tenant screen mint an HMAC-signed, `HttpOnly`, `SameSite=Lax`, one-hour `platform_tenant` cookie that routes the panel's *own* host to that tenant, so a freshly provisioned website is usable the moment it exists — and on a host that serves no per-tenant DNS at all (a laptop, a tunnel hostname, a preview host). It is honoured only on the Master Panel host and only for `active`/`grace_period` tenants; a real customer hostname always resolves by its own record, and a forged or expired route is ignored. It routes the browser — it does **not** log anybody in: the tenant CMS still asks for that tenant's own administrator password, so there is no backdoor into a customer site. A bar at the foot of the page names the tenant and offers **Exit to hosting panel** (`GET /__platform/exit`, read before the channel, so leaving always works and clears the tenant's CMS cookies too). Every open is written to `master_audit_log` as `tenant.opened`.
+  - **Canonical URLs follow the tenant, not the host**: `siteOrigin()` (`src/lib/origin.ts`) reads the tenant's primary domain from its policy, so canonical links, Open Graph, the RSS autodiscovery link, `/sitemap.xml` and `/feed.xml` name the customer's real domain even while the site is reached through the panel's host. The page cache key still uses the request host, so two hostnames never share a cached page.
   - `PlatformScheduler` (`src/platform/scheduler.ts`) runs staggered per-tenant CMS cron batches (`batchSize=10`/min), 15-minute lifecycle expiry & Cloudflare domain-status sync ticks, and daily `02:00 UTC` backups.
 - **Dedicated Cloudflare Reverse Proxy Worker (`cloudflare-proxy-worker/`)**:
   - Separate from `wrangler.toml`'s standalone single-site Worker (`src/index.ts`).
@@ -56,6 +58,17 @@ npm run start:platform
 ```
 
 Then open `http://panel.localhost:8787/setup` (or send `Host: panel.localhost:8787`) to create the initial Master Owner account.
+
+## From provisioned tenant to published post
+
+The whole customer journey, in the order it happens:
+
+1. **Provision** — *Websites & Tenants → Provision New Website*. Pick or create the customer, pick a plan, enter the website title, the custom domain, the CMS admin URL slug, and the **initial CMS administrator** username / email / password. Provisioning runs all 14 steps: tenant id, master records, the tenant's own SQLite database, its upload directory, the CMS schema and config, the customer's admin account plus a starter home page, the plan and first invoice, the Cloudflare custom hostname, DNS/SSL checks, website and admin health checks, an isolation check, and activation. It is idempotent on its idempotency key, so a retry resumes rather than duplicating.
+2. **Enter the website** — on the tenant screen, **Open Website** shows the public site and **Open CMS Admin** opens `/{admin_slug}`, both on the panel's own address. No DNS needed yet.
+3. **The tenant signs in and posts** — the tenant CMS asks for the username and password set at step 1 (or reset later with *CMS Admin Password Reset*). From there it is the ordinary CMS: write a post, publish it, and it is live on the tenant's website at `/blog/{slug}`, in `/feed.xml`, `/sitemap.xml` and `/api/posts`.
+4. **Hand over the domain** — the tenant screen lists the Cloudflare TXT/CNAME records for the customer. Once their DNS points at the platform, `https://their-domain/` serves the same site and the access channel is no longer needed for them.
+5. **Keep control** — suspend and reactivate (data always preserved), take verified backups, restore, reset the CMS password, add domains, and delete — all from the same screen, all audited.
+
 
 ## Production Cutover Checklist (Phase 12 — Requires Explicit Authorization)
 
