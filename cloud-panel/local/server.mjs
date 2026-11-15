@@ -1,0 +1,134 @@
+#!/usr/bin/env node
+/**
+ * Local preview server: runs the Worker's `fetch` handler under plain Node.
+ *
+ *   node local/server.mjs            # http://localhost:8787
+ *   PORT=3000 node local/server.mjs
+ *
+ * TypeScript is loaded through Node's built-in type stripping (Node >= 22.18,
+ * or `node --experimental-strip-types`). Storage is node:sqlite for D1 and a
+ * folder on disk for KV, so nothing here depends on Cloudflare.
+ */
+
+import { createServer } from 'node:http';
+import { mkdir, readFile } from 'node:fs/promises';
+import { dirname, extname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { LocalD1 } from './d1.mjs';
+import { LocalKV } from './kv.mjs';
+
+const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const dataDir = join(root, 'local', 'data');
+await mkdir(dataDir, { recursive: true });
+
+const env = {
+  DB: new LocalD1(join(dataDir, 'panel.sqlite')),
+  KV: new LocalKV(join(dataDir, 'kv')),
+  PANEL_PATH: process.env.PANEL_PATH ?? '/_panel',
+  PANEL_HOST: process.env.PANEL_HOST ?? '',
+  PANEL_SETUP_TOKEN: process.env.PANEL_SETUP_TOKEN ?? '',
+  PANEL_NAME: process.env.PANEL_NAME ?? '',
+  INSECURE_COOKIES: '1',
+};
+
+let worker;
+try {
+  worker = (await import(join(root, 'src/index.ts'))).default;
+} catch (err) {
+  console.error('\nCould not load the Worker source.\n');
+  console.error(String(err?.stack ?? err));
+  console.error('\nThis runner needs Node 22.18+ (built-in TypeScript stripping) or run:');
+  console.error('  node --experimental-strip-types local/server.mjs\n');
+  process.exit(1);
+}
+
+const PORT = Number(process.env.PORT ?? 8787);
+const HOST = process.env.HOST ?? '0.0.0.0';
+
+/** Minimal ExecutionContext stand-in: waitUntil keeps a promise set alive. */
+function makeCtx() {
+  const pending = new Set();
+  return {
+    waitUntil(p) {
+      pending.add(p);
+      Promise.resolve(p).finally(() => pending.delete(p));
+    },
+    passThroughOnException() {},
+    props: {},
+    _pending: pending,
+  };
+}
+
+function toHeaders(nodeHeaders) {
+  const h = new Headers();
+  for (const [k, v] of Object.entries(nodeHeaders)) {
+    if (Array.isArray(v)) v.forEach((x) => h.append(k, x));
+    else if (v !== undefined) h.set(k, v);
+  }
+  return h;
+}
+
+async function readBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  return Buffer.concat(chunks);
+}
+
+const server = createServer(async (req, res) => {
+  try {
+    const url = `http://${req.headers.host ?? `localhost:${PORT}`}${req.url}`;
+    const method = req.method ?? 'GET';
+    const headers = toHeaders(req.headers);
+    let body;
+    if (method !== 'GET' && method !== 'HEAD') {
+      const buf = await readBody(req);
+      body = buf.length ? buf : undefined;
+    }
+
+    const request = new Request(url, { method, headers, body, redirect: 'manual' });
+    const ctx = makeCtx();
+    const response = await worker.fetch(request, env, ctx);
+
+    // Wait for background work so the local DB is consistent before we exit.
+    if (ctx._pending.size) await Promise.allSettled([...ctx._pending]);
+
+    res.statusCode = response.status;
+    const setCookies = response.headers.getSetCookie?.() ?? [];
+    for (const [k, v] of response.headers) {
+      if (k.toLowerCase() === 'set-cookie') continue;
+      res.setHeader(k, v);
+    }
+    if (setCookies.length) res.setHeader('set-cookie', setCookies);
+
+    if (!response.body) {
+      res.end();
+      return;
+    }
+    const buf = Buffer.from(await response.arrayBuffer());
+    res.setHeader('content-length', String(buf.byteLength));
+    res.end(buf);
+  } catch (err) {
+    console.error('[local] request failed:', err);
+    res.statusCode = 500;
+    res.setHeader('content-type', 'text/plain; charset=utf-8');
+    res.end(`Local server error:\n\n${String(err?.stack ?? err)}`);
+  }
+});
+
+server.listen(PORT, HOST, () => {
+  const panelPath = env.PANEL_PATH;
+  console.log('');
+  console.log('  AMS Cloud Panel — local preview');
+  console.log(`  ─────────────────────────────────────────`);
+  console.log(`  Panel    http://localhost:${PORT}${panelPath}`);
+  console.log(`  Data     ${dataDir}`);
+  console.log(`  Storage  node:sqlite (D1 shim) + folder (KV shim)`);
+  console.log('');
+  console.log('  Press Ctrl+C to stop.');
+  console.log('');
+});
+
+process.on('SIGINT', () => {
+  console.log('\nShutting down…');
+  server.close(() => process.exit(0));
+});
