@@ -22,8 +22,14 @@ export type Env = {
   PANEL_NAME?: string;
   /** Optional: PBKDF2 iterations. Lower = faster on the free plan. */
   KDF_ITERATIONS?: string;
+  /** Optional Cloudflare account ID used for automatic per-site CMS deployments. */
+  CF_ACCOUNT_ID?: string;
+  /** Cloudflare API token with Workers, D1 and KV edit permissions. Keep secret. */
+  CF_API_TOKEN?: string;
   /** Optional: force cookie `Secure` flag off for local http previews. */
   INSECURE_COOKIES?: string;
+  /** KV key containing the prebuilt CMS Worker template. Defaults to cms/template-v1. */
+  CMS_TEMPLATE_KEY?: string;
   /** Static assets binding, if the deployment bundles one. */
   ASSETS?: any;
 };

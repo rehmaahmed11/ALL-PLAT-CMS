@@ -12,6 +12,8 @@
     "postinstall": "node scripts/adopt-resources.mjs",
     "local": "node local/server.mjs",
     "build": "node scripts/bundle.mjs",
+    "cms:template:build": "node scripts/build-cms-template.mjs",
+    "cms:template:upload": "node scripts/upload-cms-template.mjs",
     "tail": "wrangler tail",
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/*.test.mjs"
