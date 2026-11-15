@@ -19,7 +19,20 @@ This means the resource exists in Cloudflare but its ID is missing from this
 repo's config; it is not a build failure. Do not create another namespace with
 the same title.
 
-List the existing resource IDs using an authenticated Wrangler CLI:
+**This is handled automatically.** `npm install` runs
+`scripts/adopt-resources.mjs` (the `postinstall` hook): in an environment
+with Cloudflare credentials — including every Workers Builds run, which
+shares its credentials with the deploy step — it executes
+`wrangler kv namespace list` and `wrangler d1 list --json`, writes the
+matching `id` and `database_id` into `wrangler.toml`, and the deploy then
+sees fully-specified bindings and skips provisioning. The hook is
+best-effort: with no credentials (a plain local install) it changes nothing
+and exits successfully. Because it runs on every install, you can also let
+it fill in the IDs once, commit the resulting `wrangler.toml`, and builds
+become deterministic from then on (the IDs are not secrets).
+
+If you would rather fill the IDs in by hand — or the hook could not reach
+your account — list them with an authenticated Wrangler CLI:
 
 ```bash
 npx wrangler kv namespace list
