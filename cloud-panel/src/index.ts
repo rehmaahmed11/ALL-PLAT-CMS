@@ -65,22 +65,25 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   // ---- first run -----------------------------------------------------------
   if (users === 0) {
-    if (path === '/install' || onPanelPath) {
-      const res = await installWizard(request, env, ctx, { panelPath });
-      return res;
+    const installPath = `${panelPath}/install`;
+    if (path === installPath || path === '/install') {
+      return await installWizard(request, env, ctx, { panelPath });
     }
     if (path === '/favicon.ico') return new Response(null, { status: 204 });
-    return new Response(null, { status: 302, headers: { Location: `${panelPath}/install` } });
+    // Everything else on a fresh deployment points at the wizard, so opening the
+    // bare Worker hostname is enough to get started.
+    if (request.method === 'GET') {
+      return new Response(null, { status: 302, headers: { Location: installPath } });
+    }
+    return new Response('Not found', { status: 404 });
   }
 
   // ---- panel --------------------------------------------------------------
-  const wantsPanel =
-    onPanelPath ||
-    (onPanelHost && !onPanelPath && path !== '/install') ||
-    // Health probe is available on any host so uptime tools can watch the panel.
-    (path === '/_panel/healthz' && onPanelPath);
+  // The panel answers on its reserved path on any host, and on the root of
+  // PANEL_HOST when that is configured (so panel.example.com works bare).
+  const wantsPanel = onPanelPath || (onPanelHost && path !== '/install');
 
-  if (wantsPanel || onPanelPath) {
+  if (wantsPanel) {
     const internalPath = onPanelPath ? url.pathname.slice(panelPath.length) || '/' : url.pathname;
     const session = await loadSession(env, cookies[SESSION_COOKIE]);
     const c: Ctx = {
