@@ -116,6 +116,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   }
 
   // ---- customer sites -----------------------------------------------------
-  if (path === '/install') return new Response('Not found', { status: 404 });
+  // The panel installer is closed once the panel has an owner, but a customer
+  // CMS may still need its own installer. Route that request to the site's
+  // origin; never expose the panel installer again on the configured panel host.
+  if (path === '/install' && onPanelHost) return new Response('Not found', { status: 404 });
   return serveSiteHost(request, env, ctx, url);
 }
