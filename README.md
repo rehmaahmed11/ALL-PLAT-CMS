@@ -100,10 +100,38 @@ maintenance) and one-click credential rotation.
 TXT ownership token (`_ams-verify.<host>`) so you can prove a domain is yours
 before trusting it.
 
-**Serving** — two modes, chosen per site:
-- *proxy*: forward to an existing Node CMS origin (the AMS CMS `Hono` server),
-- *bundle*: upload a zip once; the Worker serves it straight out of KV with SPA
-  fallback, per-type caching, and immutable caching for hashed assets.
+**Serving** — static sites can upload a zip bundle to KV. CMS sites use the
+cached AMS CMS Worker template: each gets a separate Cloudflare Worker, D1
+database, and KV namespace, while all future sites reuse the same built
+template (no GitHub download per site). The custom-domain Worker proxies to
+that per-site CMS Worker, whose admin URL is `/admin-panel`.
+
+### Automatic per-site AMS CMS deployments
+
+The repository in the new-site form is the source for a **single master build**.
+Build and upload it once, then give the hosting-panel Worker Cloudflare API
+access so each CMS site can create its own Worker and isolated data stores.
+Each new CMS site is deployed automatically; its first visit to `/install` is
+where you create that site's CMS login. Static sites can still be created by
+choosing the static kind.
+
+1. Build the reusable template once (Node.js, npm, `curl`, and `tar` required):
+   `npm run cms:template:build`.
+2. Set `CF_ACCOUNT_ID` and `CF_API_TOKEN` as secrets on the panel Worker. The
+token needs Workers Scripts edit, D1 edit, KV edit, and Workers account settings
+read permissions. Do not put the token in source control or send it in chat.
+3. Upload the built master to the panel's KV once from a trusted machine:
+   `CF_ACCOUNT_ID=... CF_API_TOKEN=... npm run cms:template:upload`.
+   The helper finds the panel namespace named `hosting-panel-cms-kv`; if yours
+   has another title, set `PANEL_KV_NAMESPACE_ID` too.
+4. Create a CMS site in the panel. Its independent Worker and storage are
+   provisioned from KV; finish installation at `https://<site-domain>/install`
+   and then sign in at `https://<site-domain>/admin-panel`.
+
+`CF_API_TOKEN` is highly privileged: only site owners/admins can trigger
+provisioning, and deleting a managed site also deletes its child Worker, D1
+ database, and KV namespace. Cloudflare account plan/resource limits still
+apply to the number of isolated sites you can create.
 
 **Deployments** — versioned bundles with instant activate, rollback to the
 previous release, and SHA-256 fingerprints.

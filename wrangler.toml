@@ -28,6 +28,11 @@ binding = "KV"
 [triggers]
 crons = ["*/10 * * * *"]
 
+# Automatic per-site CMS deployments require these runtime settings:
+#   CF_ACCOUNT_ID  -> Worker variable or secret
+#   CF_API_TOKEN   -> Worker secret (Workers Scripts, D1, KV edit + account settings read)
+# Upload the built CMS template once to the bound KV namespace as cms/template-v1.
+
 # Optional custom domain for the panel itself.
 # [[routes]]
 # pattern = "panel.example.com"
