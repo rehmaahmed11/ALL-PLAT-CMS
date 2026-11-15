@@ -1,0 +1,29 @@
+{
+  "name": "ams-cloud-panel",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AMS Cloud Panel — a multi-site hosting control panel that runs on Cloudflare Free Workers (D1 + KV + R2-free file store) and on a local Node.js preview.",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "local": "node local/server.mjs",
+    "build": "node scripts/bundle.mjs",
+    "tail": "wrangler tail",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261113.1",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0",
+    "wrangler": "^4.162.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

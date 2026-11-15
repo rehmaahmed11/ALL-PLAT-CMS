@@ -1,0 +1,249 @@
+import type { Ctx } from '../types.ts';
+import { h, raw, esc, SafeHtml } from '../lib/http.ts';
+import { icons, type IconName } from './icons.ts';
+import { CSS } from './style.ts';
+
+export type NavItem = { href: string; label: string; icon: IconName; match?: string };
+
+const NAV: Array<{ group?: string; items: NavItem[] }> = [
+  {
+    items: [
+      { href: '', label: 'Overview', icon: 'grid', match: 'exact' },
+      { href: '/sites', label: 'Sites', icon: 'globe' },
+      { href: '/domains', label: 'Domains', icon: 'layers' },
+      { href: '/monitor', label: 'Monitoring', icon: 'activity' },
+    ],
+  },
+  {
+    group: 'Content',
+    items: [
+      { href: '/pages', label: 'Pages', icon: 'doc' },
+      { href: '/media', label: 'Media', icon: 'image' },
+    ],
+  },
+  {
+    group: 'Operations',
+    items: [
+      { href: '/backups', label: 'Backups', icon: 'database' },
+      { href: '/deployments', label: 'Deployments', icon: 'rocket' },
+      { href: '/env', label: 'Environment', icon: 'terminal' },
+    ],
+  },
+  {
+    group: 'System',
+    items: [
+      { href: '/team', label: 'Team', icon: 'users' },
+      { href: '/apikeys', label: 'API keys', icon: 'key' },
+      { href: '/audit', label: 'Audit log', icon: 'shield' },
+      { href: '/settings', label: 'Settings', icon: 'cog' },
+      { href: '/docs', label: 'Docs', icon: 'book' },
+    ],
+  },
+];
+
+function icon(name: IconName, cls = ''): SafeHtml {
+  return raw(`<span class="ico ${cls}" style="display:inline-flex">${icons[name] ?? ''}</span>`);
+}
+
+export type ShellOpts = {
+  c: Ctx;
+  title: string;
+  active: string;
+  crumbs?: Array<{ label: string; href?: string }>;
+  body: SafeHtml;
+  wide?: boolean;
+  bodyClass?: string;
+  headExtra?: string;
+  actions?: SafeHtml;
+  siteSwitcher?: { sites: Array<{ id: string; name: string; host: string }>; current: string | null };
+};
+
+export function fullPage(opts: { title: string; body: SafeHtml; theme?: string; bodyClass?: string; headExtra?: string; desc?: string }): string {
+  const theme = opts.theme ?? 'auto';
+  return `<!doctype html>
+<html lang="en" data-theme="${esc(theme)}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<meta name="color-scheme" content="dark light">
+<title>${esc(opts.title)}</title>
+<style>${CSS}</style>
+${opts.headExtra ?? ''}
+</head>
+<body class="${esc(opts.bodyClass ?? '')}">
+${opts.body.value}
+</body>
+</html>`;
+}
+
+export function shell(opts: ShellOpts): Response {
+  const { c, title, active, body } = opts;
+  const base = c.panelPath; // e.g. /_panel
+  const path = c.url.pathname.slice(base.length) || '/';
+  const panelName = (c as any).panelName ?? 'AMS Cloud Panel';
+
+  const navHtml = NAV.map((group) => {
+    const items = group.items
+      .map((item) => {
+        const href = base + item.href;
+        const on = item.match === 'exact' ? path === '/' || path === '' : path === item.href || path.startsWith(item.href + '/');
+        return `<a href="${esc(href)}" class="${on ? 'on' : ''}">${icons[item.icon]}<span>${esc(item.label)}</span></a>`;
+      })
+      .join('');
+    return `${group.group ? `<div class="sep">${esc(group.group)}</div>` : ''}${items}`;
+  }).join('');
+
+  const crumbs = (opts.crumbs ?? []).map((cr, i, arr) => {
+    const last = i === arr.length - 1;
+    const label = last ? `<b>${esc(cr.label)}</b>` : cr.href ? `<a href="${esc(cr.href)}">${esc(cr.label)}</a>` : esc(cr.label);
+    return `${label}${last ? '' : '<span class="muted">/</span>'}`;
+  }).join('');
+
+  const siteSwitcher = opts.siteSwitcher && opts.siteSwitcher.sites.length > 0
+    ? h`<form method="get" action="${base}/switch" style="margin:0">
+        <select name="site" onchange="this.form.submit()" style="min-width:180px;padding:7px 10px">
+          <option value="_all"${!opts.siteSwitcher.current ? ' selected' : ''}>All sites (fleet)</option>
+          ${opts.siteSwitcher.sites.map(
+            (s) => raw(`<option value="${esc(s.id)}"${opts.siteSwitcher!.current === s.id ? ' selected' : ''}>${esc(s.name)} — ${esc(s.host)}</option>`),
+          )}
+        </select></form>`
+    : h``;
+
+  const flash = c.flash
+    ? h`<div class="flash ${c.flash.kind}">${raw(icons[c.flash.kind === 'ok' ? 'check' : c.flash.kind === 'err' ? 'warning' : 'activity'])}<div>${c.flash.text}</div></div>`
+    : h``;
+
+  const user = c.user;
+  const topbar = h`
+  <header class="top">
+    <div class="grow crumb">${raw(crumbs || `<b>${esc(title)}</b>`)}</div>
+    ${siteSwitcher}
+    ${opts.actions ?? h``}
+    <button class="btn sm ghost" title="Toggle theme" onclick="amsTheme()">${raw(icons.moon)}</button>
+    ${user
+      ? h`<details style="position:relative">
+           <summary class="btn sm ghost" style="list-style:none;cursor:pointer">${esc(user.name || user.username)} ▾</summary>
+           <div class="card" style="position:absolute;right:0;top:calc(100% + 6px);width:220px;padding:8px;z-index:40">
+             <div style="padding:8px 10px;border-bottom:1px solid var(--line);margin-bottom:6px">
+               <div style="font-weight:600">${esc(user.name || user.username)}</div>
+               <div class="muted" style="font-size:.78rem">${esc(user.email)} · ${esc(user.role)}</div>
+             </div>
+             <a class="btn ghost sm" style="width:100%;justify-content:flex-start" href="${base}/account">${raw(icons.shield)} Account</a>
+             <form method="post" action="${base}/logout" style="margin:0">
+               <input type="hidden" name="csrf" value="${c.session?.csrf ?? ''}">
+               <button class="btn ghost sm" style="width:100%;justify-content:flex-start;margin-top:4px">${raw(icons.logout)} Sign out</button>
+             </form>
+           </div>
+         </details>`
+      : h``}
+  </header>`;
+
+  const page = h`
+  <div class="shell">
+    <aside class="side">
+      <div class="brand">
+        <div class="logo">AM</div>
+        <div><b>${panelName}</b><small>Cloudflare Edge Panel</small></div>
+      </div>
+      <nav class="nav">${raw(navHtml)}</nav>
+      <div class="sidefoot">
+        <div>v1.0.0 · Free plan ready</div>
+        <a href="${base}/docs">Deployment guide →</a>
+      </div>
+    </aside>
+    <div class="main">
+      ${topbar}
+      <main class="content">${flash}${body}</main>
+    </div>
+  </div>
+  <div class="toast-wrap" id="toasts"></div>
+  <script>
+  function amsTheme(){
+    var r=document.documentElement, cur=r.getAttribute('data-theme'), nxt=cur==='light'?'dark':'light';
+    r.setAttribute('data-theme',nxt);
+    try{localStorage.setItem('ams-theme',nxt)}catch(e){}
+  }
+  try{var t=localStorage.getItem('ams-theme'); if(t)document.documentElement.setAttribute('data-theme',t);}catch(e){}
+  function amsToast(msg,kind){
+    var w=document.getElementById('toasts'); if(!w)return;
+    var d=document.createElement('div'); d.className='toast'+(kind==='err'?' err':''); d.textContent=msg;
+    w.appendChild(d); setTimeout(function(){d.remove()},3200);
+  }
+  function amsCopy(btn){
+    var t=btn.parentNode.querySelector('span').textContent.trim();
+    navigator.clipboard.writeText(t).then(function(){amsToast('Copied to clipboard')},function(){amsToast('Copy failed','err')});
+  }
+  document.addEventListener('click',function(e){
+    var b=e.target.closest('[data-copy]'); if(b){amsCopy(b);}
+    var cf=e.target.closest('[data-confirm]'); if(cf && !confirm(cf.getAttribute('data-confirm'))){e.preventDefault();e.stopPropagation();}
+  });
+  </script>`;
+
+  return new Response(fullPage({ title: `${title} · ${panelName}`, body: page, bodyClass: opts.bodyClass, headExtra: opts.headExtra }), {
+    status: 200,
+    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+  });
+}
+
+// ---------- building blocks -------------------------------------------------
+
+export function pageHeader(title: string, sub?: string, actions?: SafeHtml): SafeHtml {
+  return h`<div class="row between" style="margin-bottom:18px">
+    <div><h1 style="margin:0">${title}</h1>${sub ? h`<p class="muted" style="margin:4px 0 0">${sub}</p>` : ''}</div>
+    ${actions ?? ''}
+  </div>`;
+}
+
+export function statCard(label: string, value: unknown, detail?: string, iconName?: IconName): SafeHtml {
+  return h`<div class="stat">
+    <div class="k">${iconName ? icon(iconName) : ''}${label}</div>
+    <div class="v">${value}</div>
+    ${detail ? h`<div class="d">${detail}</div>` : ''}
+  </div>`;
+}
+
+export function badge(text: string, kind: string): SafeHtml {
+  return raw(`<span class="badge ${esc(kind)}"><span class="dot"></span>${esc(text)}</span>`);
+}
+
+export function statusBadge(status: string): SafeHtml {
+  const map: Record<string, string> = { live: 'live', ok: 'ok', active: 'active', published: 'published', paused: 'paused', pending: 'pending', draft: 'draft', error: 'error', failed: 'failed', down: 'down', maintenance: 'maintenance' };
+  return badge(status, map[status] ?? 'mute');
+}
+
+export function empty(iconName: IconName, title: string, sub?: string, action?: SafeHtml): SafeHtml {
+  return h`<div class="empty">
+    ${raw(icons[iconName])}
+    <h3 style="margin:6px 0 4px">${title}</h3>
+    ${sub ? h`<p class="muted" style="margin:0 auto 14px;max-width:420px">${sub}</p>` : ''}
+    ${action ?? ''}
+  </div>`;
+}
+
+export function copyBox(value: string): SafeHtml {
+  return h`<div class="copy"><span>${value}</span><button type="button" data-copy>${raw(icons.copy)}</button></div>`;
+}
+
+export function csrfInput(c: Ctx): SafeHtml {
+  return raw(`<input type="hidden" name="csrf" value="${esc(c.session?.csrf ?? '')}">`);
+}
+
+export function field(label: string, input: SafeHtml, hint?: string): SafeHtml {
+  return h`<div class="field"><label>${label}</label>${input}${hint ? h`<p class="hint">${hint}</p>` : ''}</div>`;
+}
+
+/** Tiny inline sparkline from a numeric series. */
+export function sparkline(values: number[], height = 34): SafeHtml {
+  if (!values.length) return h`<div class="muted" style="font-size:.8rem">no data yet</div>`;
+  const w = 220;
+  const max = Math.max(...values, 1);
+  const step = values.length > 1 ? w / (values.length - 1) : w;
+  const pts = values.map((v, i) => `${(i * step).toFixed(1)},${(height - (v / max) * (height - 4) - 2).toFixed(1)}`).join(' ');
+  return h`<svg class="spark" viewBox="0 0 ${w} ${height}" preserveAspectRatio="none">
+    <polyline points="${pts}" fill="none" stroke="url(#sg)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    <defs><linearGradient id="sg" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5b8cff"/><stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient></defs>
+  </svg>`;
+}

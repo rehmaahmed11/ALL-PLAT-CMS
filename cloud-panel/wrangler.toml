@@ -1,0 +1,34 @@
+name = "ams-cloud-panel"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+# The panel is a single Worker serving many sites by Host header.
+workers_dev = true
+
+# First-run install token. Set it before the first deploy with:
+#   wrangler secret put PANEL_SETUP_TOKEN
+# Until it is set, the panel only accepts install from the same origin it is
+# first opened on, and prints a one-time token into the console log.
+
+# ---------------------------------------------------------------------------
+# Storage: all free-plan resources. No R2 (needs a card), no paid plans.
+# `wrangler deploy` creates the D1 database and KV namespace on first deploy.
+# ---------------------------------------------------------------------------
+[[d1_databases]]
+binding = "DB"
+database_name = "ams_cloud_panel"
+
+[[kv_namespaces]]
+binding = "KV"
+
+# Optional: cron for uptime checks / scheduled publishes / housekeeping.
+[triggers]
+crons = ["*/10 * * * *"]
+
+# Optional custom domain for the panel itself.
+# [[routes]]
+# pattern = "panel.example.com"
+# custom_domain = true
+
+[observability]
+enabled = true
