@@ -213,7 +213,6 @@ export async function provisionCms(env: Env, site: Site): Promise<CmsInstance> {
       main_module: 'index.js',
       compatibility_date: '2025-01-01',
       compatibility_flags: ['nodejs_compat'],
-      workers_dev: true,
       observability: { enabled: true },
       bindings: [
         { type: 'd1', name: 'DB', id: databaseId },
@@ -225,6 +224,11 @@ export async function provisionCms(env: Env, site: Site): Promise<CmsInstance> {
     form.set('index.js', new Blob([script], { type: 'application/javascript+module' }), 'index.js');
     const workerPath = `/accounts/${encodeURIComponent(auth.accountId)}/workers/scripts/${encodeURIComponent(workerName)}`;
     await cf(auth, workerPath, { method: 'PUT', body: form });
+    // Script uploads do not enable public routing. workers_dev is a Wrangler
+    // config option, not upload metadata; enable the script subdomain explicitly.
+    await cf(auth, `${workerPath}/subdomain`, {
+      method: 'POST', body: JSON.stringify({ enabled: true }),
+    });
     // The CMS uses this cron for scheduled publishing and maintenance.
     await cf(auth, `${workerPath}/schedules`, {
       method: 'PUT', body: JSON.stringify([{ cron: '*/5 * * * *' }]),
