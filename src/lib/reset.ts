@@ -95,6 +95,7 @@ export async function factoryReset(env: Env): Promise<ResetSummary> {
   // Counted before the index that holds the count is emptied.
   summary.files = await countFiles(env);
 
+  const failures: string[] = [];
   for (const name of await listTables(env)) {
     try {
       // One statement per table rather than one batch: a batch rolls back as a
@@ -103,7 +104,16 @@ export async function factoryReset(env: Env): Promise<ResetSummary> {
       summary.tables++;
     } catch (err) {
       console.error(`reset: could not clear ${name}:`, err);
+      failures.push(name);
     }
+  }
+
+  // Do not clear KV (which holds both the install lock and config) if even one
+  // D1 table survived. In particular, leaving `users` behind while deleting
+  // `installed` makes the installer re-lock the site without a usable config.
+  // Fail loudly so the operator can repair the database and retry the reset.
+  if (failures.length) {
+    throw new Error(`Factory reset stopped: could not clear D1 table${failures.length === 1 ? '' : 's'} ${failures.join(', ')}. KV and uploaded files were left untouched; repair the database, then retry.`);
   }
 
   if (env.FILES?.clear) await env.FILES.clear();

@@ -43,6 +43,16 @@ const bundled = await build({
   },
 });
 const worker = (await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].contents).toString('base64')}`)).default;
+const resetBundle = await build({
+  entryPoints: [join(ROOT, 'src/lib/reset.ts')],
+  bundle: true,
+  platform: 'neutral',
+  format: 'esm',
+  target: 'es2022',
+  write: false,
+  logLevel: 'silent',
+});
+const { factoryReset } = await import(`data:text/javascript;base64,${Buffer.from(resetBundle.outputFiles[0].contents).toString('base64')}`);
 
 const ctx = { waitUntil() {}, passThroughOnException() {}, props: {} };
 const request = (path, env) => worker.fetch(new Request(`https://cms.example${path}`), env, ctx);
@@ -174,6 +184,33 @@ test('an installed site with no KV config gets a recovery page and health issue'
   assert.equal(body.configuration, 'missing');
   assert.ok(body.issues.includes('configuration_missing'));
   assert.match(body.fix, /Restore the KV `config` key/);
+});
+
+test('a failed D1 table wipe aborts reset before deleting the KV config and install lock', async () => {
+  const calls = { kvList: 0, kvDelete: 0, filesClear: 0 };
+  const env = {
+    DB: {
+      prepare(sql) {
+        return {
+          bind() { return this; },
+          async first() { return { n: 0 }; },
+          async all() { return { results: [{ name: 'users' }] }; },
+          async run() {
+            if (sql.includes('DROP TABLE') && sql.includes('users')) throw new Error('simulated D1 constraint failure');
+            return { success: true };
+          },
+        };
+      },
+    },
+    KV: {
+      async list() { calls.kvList++; return { keys: [], list_complete: true, cursor: '' }; },
+      async delete() { calls.kvDelete++; },
+    },
+    FILES: { async clear() { calls.filesClear++; } },
+  };
+
+  await assert.rejects(factoryReset(env), /Factory reset stopped: could not clear D1 table users/);
+  assert.deepEqual(calls, { kvList: 0, kvDelete: 0, filesClear: 0 }, 'storage outside D1 remains intact for a safe retry');
 });
 
 test('unexpected runtime errors still point at health and logs', async () => {
