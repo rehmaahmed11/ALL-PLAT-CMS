@@ -13,12 +13,38 @@ npx wrangler deploy
 Wrangler can provision missing resources on the first deploy. If a namespace
 with the configured title already exists (for example, after a partially
 completed first deploy or when deploying through Workers Builds), Wrangler may
-not be able to adopt it automatically. In that case, bind the existing
-resources explicitly: run `npx wrangler kv namespace list` and
-`npx wrangler d1 list`, then set the KV namespace `id` and D1 `database_id` in
-`wrangler.toml` for the matching resources. Do not create another namespace
-with the same title. Open `https://hosting-panel-cms.<subdomain>.workers.dev/_panel`
-and complete the installer.
+not be able to adopt it automatically. The deploy then fails with
+`a namespace with this account ID and title already exists` (code `10014`).
+This means the resource exists in Cloudflare but its ID is missing from this
+repo's config; it is not a build failure. Do not create another namespace with
+the same title.
+
+List the existing resource IDs using an authenticated Wrangler CLI:
+
+```bash
+npx wrangler kv namespace list
+npx wrangler d1 list
+```
+
+Use the KV `id` for the namespace titled `hosting-panel-cms-kv`, and the D1
+`uuid` for the database named `ams_cloud_panel`. Add those values to the
+corresponding bindings in `wrangler.toml`:
+
+```toml
+[[d1_databases]]
+binding = "DB"
+database_name = "ams_cloud_panel"
+database_id = "<uuid from wrangler d1 list>"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "<id from wrangler kv namespace list>"
+```
+
+Save the config and rerun `npx wrangler deploy` (or trigger the Workers Build
+again). Keep the real IDs in the deployment config; the placeholders above are
+for illustration only. Open `https://hosting-panel-cms.<subdomain>.workers.dev/_panel`
+and complete the installer after deployment succeeds.
 
 Before you deploy, decide whether to lock the installer:
 
