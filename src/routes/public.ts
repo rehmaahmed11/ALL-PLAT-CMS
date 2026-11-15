@@ -15,7 +15,7 @@ import type { ThemeBundle } from '../lib/theme-manifest';
 import { cspFor, nonceFor, safeUrl, stripTags, type CspMode } from '../lib/security';
 import { landingEnabled, landingPlayShown, landingScreenMarkup, parseLandingAudioIds, type LandingAudioTrack } from '../lib/landing';
 import { readTokens, schemeMeta } from '../lib/tokens';
-import { titleFor } from '../lib/origin';
+import { siteOrigin, titleFor } from '../lib/origin';
 import { publicPageHierarchy, type PublicPageHierarchy } from '../lib/page-hierarchy';
 import { getThemeAsset, loadTheme } from '../lib/theme-store';
 import { cleanAssetPath, isRefusedAsset } from '../lib/theme-manifest';
@@ -252,7 +252,7 @@ const xmlEsc = (v: unknown): string =>
 site.get('/sitemap.xml', async (c) => {
   const settings = await getSettings(c.env);
   if (!pluginOn(settings, 'sitemap')) return c.notFound();
-  const origin = new URL(c.req.url).origin;
+  const origin = siteOrigin(c.env, new URL(c.req.url));
   const style = permalinkStyle(settings);
   const homeId = Number(settings.home_page_id) || 0;
   const [{ results: content }, { results: terms }] = await Promise.all([
@@ -282,7 +282,7 @@ site.get('/sitemap.xml', async (c) => {
 site.get('/robots.txt', async (c) => {
   const settings = await getSettings(c.env);
   if (!pluginOn(settings, 'robots')) return c.notFound();
-  const origin = new URL(c.req.url).origin;
+  const origin = siteOrigin(c.env, new URL(c.req.url));
   const lines = ['User-agent: *', 'Allow: /', 'Disallow: /media/backups/'];
   if (pluginOn(settings, 'sitemap')) lines.push('', `Sitemap: ${origin}/sitemap.xml`);
   return new Response(lines.join('\n') + '\n', { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=600' } });
@@ -305,7 +305,7 @@ site.get('/feed.xml', async (c) => {
     if (!String(err).toLowerCase().includes('content_pages')) throw err;
     ({ results } = await queryFeed(false));
   }
-  const origin = new URL(c.req.url).origin;
+  const origin = siteOrigin(c.env, new URL(c.req.url));
   const style = permalinkStyle(settings);
   const items = results.map((p) => {
     const date = p.published_at || p.created_at;
@@ -398,7 +398,11 @@ site.get('*', async (c) => {
   let body = await renderTheme(c.env, {
     cfg: c.var.cfg,
     settings,
-    url,
+    // Absolute URLs (canonical, Open Graph, the feed link) name the tenant's own
+    // domain even when the page is reached through the panel's host or a tunnel
+    // address; the cache key below still uses the real request host, so two
+    // hostnames never share a cached page.
+    url: canonicalUrlFor(c.env, url),
     template: result.template,
     meta: result.meta,
     theme: previewTheme,
@@ -462,6 +466,20 @@ site.get('*', async (c) => {
 site.all('*', (c) => c.text('Method not allowed', 405));
 
 /* --------------------------------------------------------------- helpers */
+
+/**
+ * The same URL, but on the origin the site describes itself with.
+ *
+ * On the hosting platform a tenant's pages are reachable through the panel's
+ * host before the customer's DNS exists. Search engines and social cards must
+ * still be told the customer's own domain, so the renderer gets that origin
+ * while caching, framing and the page's own links keep using the real one.
+ */
+function canonicalUrlFor(env: Env, url: URL): URL {
+  const origin = siteOrigin(env, url);
+  if (origin === url.origin) return url;
+  return new URL(origin + url.pathname + url.search);
+}
 
 /**
  * The design tokens the landing screen paints with: saved values, plus an
