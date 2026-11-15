@@ -20,6 +20,10 @@ test('provisions an isolated CMS from cached template and records its origin', a
     if (url.pathname.endsWith('/d1/database')) result = { uuid: 'db-isolated-1' };
     else if (url.pathname.endsWith('/storage/kv/namespaces')) result = { id: 'kv-isolated-1' };
     else if (url.pathname.endsWith('/workers/subdomain')) result = { subdomain: 'account-subdomain' };
+    else if (url.pathname.endsWith('/subdomain')) {
+      assert.equal(init.method, 'POST');
+      assert.deepEqual(JSON.parse(init.body), { enabled: true });
+    }
     else if (url.pathname.endsWith('/schedules')) {
       assert.deepEqual(JSON.parse(init.body), [{ cron: '*/5 * * * *' }]);
     }
@@ -48,7 +52,7 @@ test('provisions an isolated CMS from cached template and records its origin', a
     assert.equal(instance.database_id, 'db-isolated-1');
     assert.equal(instance.kv_namespace_id, 'kv-isolated-1');
     assert.equal(instance.worker_url, `https://${instance.worker_name}.account-subdomain.workers.dev`);
-    assert.equal(calls.length, 5);
+    assert.equal(calls.length, 6);
     const stored = await one(db, 'SELECT * FROM sites WHERE id=?', [site.id]);
     assert.equal(stored.node_url, instance.worker_url);
     assert.equal(stored.admin_slug, 'admin-panel');
@@ -124,6 +128,7 @@ test('an empty template cache downloads the prebuilt build once and stores it in
     if (url.pathname.endsWith('/d1/database')) result = { uuid: 'db-dl' };
     else if (url.pathname.endsWith('/storage/kv/namespaces')) result = { id: 'kv-dl' };
     else if (url.pathname.endsWith('/workers/subdomain')) result = { subdomain: 'dl-subdomain' };
+    else if (url.pathname.endsWith('/subdomain')) result = {};
     else if (url.pathname.endsWith('/schedules')) result = { schedules: [] };
     else if (url.pathname.includes('/workers/scripts/')) {
       uploadedModule = await init.body.get('index.js').text();
