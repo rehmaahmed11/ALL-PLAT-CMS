@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ensureSchema, one } from '../src/db/index.ts';
+import { ensureSchema, one, resetSchemaMemo } from '../src/db/index.ts';
 import { createSite } from '../src/lib/sites.ts';
-import { provisionCms } from '../src/lib/cms-provision.ts';
+import { cmsTemplateInfo, loadCmsTemplate, provisionCms } from '../src/lib/cms-provision.ts';
+import { saveCfCredentials } from '../src/lib/cf.ts';
+import { memoryKV } from '../local/kv-memory.mjs';
 import { LocalD1 } from '../local/d1.mjs';
 
 test('provisions an isolated CMS from cached template and records its origin', async () => {
@@ -57,6 +59,102 @@ test('provisions an isolated CMS from cached template and records its origin', a
 });
 
 test('provisioning fails clearly if the Cloudflare API credentials are absent', async () => {
-  const env = { DB: {}, KV: { get: async () => 'template' } };
-  await assert.rejects(() => provisionCms(env, { id: 'site-1' }), /Set CF_ACCOUNT_ID and the CF_API_TOKEN secret/);
+  const db = new LocalD1(':memory:');
+  resetSchemaMemo();
+  await ensureSchema(db);
+  const env = { DB: db, KV: { get: async () => 'template' } };
+  await assert.rejects(
+    () => provisionCms(env, { id: 'site-1', slug: 'site-1' }),
+    /Cloudflare API access is not connected yet[\s\S]*System → Cloudflare/,
+  );
+});
+
+test('provisioning uses credentials saved from the panel when no secrets are set', async () => {
+  const db = new LocalD1(':memory:');
+  resetSchemaMemo();
+  await ensureSchema(db);
+  const kv = memoryKV({ 'cms/template-v1': 'export default { fetch() {} };' });
+  const site = await createSite(db, { name: 'Panel Creds', kind: 'cms', primaryHost: 'creds.example.com' });
+  const env = { DB: db, KV: kv };
+  await saveCfCredentials(env, '023e105f4ecef8ad9ca31a8372d0c353', 'panel-stored-token-value-0123456789');
+
+  const originalFetch = globalThis.fetch;
+  let authHeader = '';
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    authHeader = init.headers?.authorization ?? authHeader;
+    let result = {};
+    if (url.pathname.endsWith('/d1/database')) result = { uuid: 'db-2' };
+    else if (url.pathname.endsWith('/storage/kv/namespaces')) result = { id: 'kv-2' };
+    else if (url.pathname.endsWith('/workers/subdomain')) result = { subdomain: 'panel-subdomain' };
+    else result = { id: 'ok' };
+    return new Response(JSON.stringify({ success: true, result }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+  try {
+    const instance = await provisionCms(env, site);
+    assert.equal(instance.status, 'active');
+    assert.equal(authHeader, 'Bearer panel-stored-token-value-0123456789');
+    assert.match(instance.worker_url, /\.panel-subdomain\.workers\.dev$/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('an empty template cache downloads the prebuilt build once and stores it in KV', async () => {
+  const db = new LocalD1(':memory:');
+  resetSchemaMemo();
+  await ensureSchema(db);
+  const kv = memoryKV();
+  const env = { DB: db, KV: kv, CF_ACCOUNT_ID: 'f'.repeat(32), CF_API_TOKEN: 'install-token-0123456789abcdef' };
+  assert.equal((await cmsTemplateInfo(env)).present, false);
+
+  const originalFetch = globalThis.fetch;
+  let templateDownloads = 0;
+  let uploadedModule = '';
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    if (url.hostname.includes('github')) {
+      templateDownloads++;
+      return new Response('export default { async fetch() { return new Response("cms"); } };', { status: 200 });
+    }
+    let result = {};
+    if (url.pathname.endsWith('/d1/database')) result = { uuid: 'db-dl' };
+    else if (url.pathname.endsWith('/storage/kv/namespaces')) result = { id: 'kv-dl' };
+    else if (url.pathname.endsWith('/workers/subdomain')) result = { subdomain: 'dl-subdomain' };
+    else if (url.pathname.endsWith('/schedules')) result = { schedules: [] };
+    else if (url.pathname.includes('/workers/scripts/')) {
+      uploadedModule = await init.body.get('index.js').text();
+      result = { id: 'worker-dl' };
+    }
+    return new Response(JSON.stringify({ success: true, result }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+  try {
+    const site = await createSite(db, { name: 'Downloaded', kind: 'cms', primaryHost: 'dl.example.com' });
+    const instance = await provisionCms(env, site);
+    assert.equal(instance.status, 'active');
+    assert.equal(templateDownloads, 1);
+    assert.match(uploadedModule, /new Response\("cms"\)/);
+    assert.match(await kv.get('cms/template-v1'), /fetch/);
+
+    // Second site reuses the cached copy instead of downloading again.
+    const second = await createSite(db, { name: 'Downloaded Two', kind: 'cms', primaryHost: 'dl2.example.com' });
+    await provisionCms(env, second);
+    assert.equal(templateDownloads, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('loadCmsTemplate prefers KV over the published build', async () => {
+  const kv = memoryKV({ 'cms/template-v1': 'export default { fetch() {} };' });
+  const env = { DB: {}, KV: kv };
+  const loaded = await loadCmsTemplate(env);
+  assert.equal(loaded.source, 'kv');
+  assert.match(loaded.script, /fetch/);
 });
