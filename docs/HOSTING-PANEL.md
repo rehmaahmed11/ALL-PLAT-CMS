@@ -18,6 +18,8 @@ This document describes the architecture, local operation, verification suite, a
   - Separate from `wrangler.toml`'s standalone single-site Worker (`src/index.ts`).
   - Terminates Cloudflare for SaaS custom-hostname traffic, strips spoofed forwarding/auth headers, signs `X-Platform-Origin-Auth` with `ORIGIN_HMAC_SECRET`, and forwards over Cloudflare Tunnel to `ORIGIN_URL`.
 
+> **Deploying to Cloudflare?** The root `wrangler.toml` deploys the standalone CMS, not this platform. It needs `DB` (D1) and `KV` bindings; without them it shows a setup page (older builds showed `Internal error`). Only `cloudflare-proxy-worker/` belongs on Workers for the multi-tenant platform. See `docs/CLOUDFLARE-DEPLOY.md`.
+
 ## Commands
 
 ```bash

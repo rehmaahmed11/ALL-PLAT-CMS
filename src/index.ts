@@ -1,6 +1,13 @@
 import { Hono } from 'hono';
 import type { Env } from './types';
-import { cfgFor, getConfig, isInstalled, bumpCache } from './lib/config';
+import { cfgFor, getConfig, isInstalled, bumpCache, ConfigMissingError } from './lib/config';
+import {
+  bindingSetupPage,
+  configurationMissingPage,
+  describeMissingBindings,
+  inspectBindings,
+  INTERNAL_ERROR_HINT,
+} from './lib/diagnostics';
 import { publishDue } from './lib/content';
 import { migrate } from './db/migrations';
 import { pruneAllRevisions, pruneLocks } from './admin/revisions';
@@ -12,13 +19,29 @@ import site from './routes/public';
 
 const app = new Hono<{ Bindings: Env }>();
 
+// Log a missing-binding configuration once per isolate, not once per request.
+const reportedBindings = new WeakSet<object>();
+
+function reportMissingBindings(env: Env): void {
+  if (reportedBindings.has(env)) return;
+  reportedBindings.add(env);
+  console.error(`[edge-cms] Cloudflare bindings missing: ${describeMissingBindings(inspectBindings(env))}. Check /api/health.`);
+}
+
 // Install gate: until the KV flag exists every URL leads to /install; once it
 // exists /install is gone for good. Host-agnostic, so it works on workers.dev
 // and on any custom domain.
 app.use('*', async (c, next) => {
   const path = new URL(c.req.url).pathname;
+  if (path === '/api/health') return next(); // must answer even when bindings are missing
+
+  const bindings = inspectBindings(c.env);
+  if (!bindings.ok) {
+    reportMissingBindings(c.env);
+    return c.html(bindingSetupPage(bindings), 503, { 'Cache-Control': 'no-store' });
+  }
+
   const onInstaller = path === '/install' || path.startsWith('/install/');
-  if (path === '/api/health') return next(); // must answer before install too
   const installed = await isInstalled(c.env);
   if (!installed && !onInstaller) {
     return new Response(null, { status: 302, headers: { Location: '/install', 'Cache-Control': 'no-store' } });
@@ -47,7 +70,15 @@ app.all('*', async (c) => {
 
 app.onError((err, c) => {
   console.error(err);
-  return c.text('Internal error', 500);
+  const bindings = inspectBindings(c.env);
+  if (!bindings.ok) {
+    reportMissingBindings(c.env);
+    return c.html(bindingSetupPage(bindings), 503, { 'Cache-Control': 'no-store' });
+  }
+  if (err instanceof ConfigMissingError) {
+    return c.html(configurationMissingPage(), 503, { 'Cache-Control': 'no-store' });
+  }
+  return c.text(INTERNAL_ERROR_HINT, 500, { 'Cache-Control': 'no-store' });
 });
 
 export default {
@@ -56,6 +87,11 @@ export default {
   // Cron Trigger: scheduled publishing + pending DB migrations.
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil((async () => {
+      const bindings = inspectBindings(env);
+      if (!bindings.ok) {
+        console.error(`[edge-cms] Cron skipped: Cloudflare bindings missing: ${describeMissingBindings(bindings)}`);
+        return;
+      }
       if (!(await isInstalled(env))) return;
       await migrate(env);
       if ((await publishDue(env)) > 0) await bumpCache(env);

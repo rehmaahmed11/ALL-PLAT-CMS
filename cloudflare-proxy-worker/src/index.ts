@@ -28,15 +28,27 @@ async function signOriginHeader(secret: string, hostname: string, tsSec: number)
   return `${tsSec}.${b64url(sig)}`;
 }
 
+function error(message: string, status: number): Response {
+  return new Response(message, { status, headers: { 'Cache-Control': 'no-store', 'X-Edge-Proxy': 'ahmed-hosting-worker' } });
+}
+
 export default {
   async fetch(request: Request, env: ProxyEnv): Promise<Response> {
     if (!env.ORIGIN_URL || !env.ORIGIN_HMAC_SECRET) {
-      return new Response('Proxy misconfigured: ORIGIN_URL and ORIGIN_HMAC_SECRET required.', { status: 500 });
+      return error('Proxy misconfigured: ORIGIN_URL and ORIGIN_HMAC_SECRET required.', 500);
+    }
+
+    let originBase: URL;
+    try {
+      originBase = new URL(env.ORIGIN_URL);
+      if (originBase.protocol !== 'https:' && originBase.protocol !== 'http:') throw new Error('unsupported protocol');
+    } catch (err) {
+      console.error('[edge-proxy] invalid ORIGIN_URL:', err);
+      return error('Proxy misconfigured: ORIGIN_URL must be an http(s) URL such as https://origin.example.com.', 500);
     }
 
     const incomingUrl = new URL(request.url);
     const hostname = incomingUrl.hostname.toLowerCase();
-    const originBase = new URL(env.ORIGIN_URL);
     const targetUrl = new URL(incomingUrl.pathname + incomingUrl.search, originBase.origin);
 
     const headers = new Headers(request.headers);
@@ -46,9 +58,14 @@ export default {
     headers.delete('x-forwarded-proto');
 
     const nowSec = Math.floor(Date.now() / 1000);
-    headers.set('x-forwarded-host', hostname);
-    headers.set('x-forwarded-proto', 'https');
-    headers.set('x-platform-origin-auth', await signOriginHeader(env.ORIGIN_HMAC_SECRET, hostname, nowSec));
+    try {
+      headers.set('x-forwarded-host', hostname);
+      headers.set('x-forwarded-proto', 'https');
+      headers.set('x-platform-origin-auth', await signOriginHeader(env.ORIGIN_HMAC_SECRET, hostname, nowSec));
+    } catch (err) {
+      console.error('[edge-proxy] could not sign the origin request:', err);
+      return error('Proxy misconfigured: ORIGIN_HMAC_SECRET could not be used to sign the request.', 500);
+    }
 
     const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
     const upstreamReq = new Request(targetUrl.toString(), {
@@ -58,7 +75,14 @@ export default {
       redirect: 'manual',
     });
 
-    const upstreamRes = await fetch(upstreamReq);
+    let upstreamRes: Response;
+    try {
+      upstreamRes = await fetch(upstreamReq);
+    } catch (err) {
+      console.error('[edge-proxy] origin request failed:', err);
+      return error('Origin unreachable. Check ORIGIN_URL, the Cloudflare Tunnel, and the Node.js platform logs.', 502);
+    }
+
     const resHeaders = new Headers(upstreamRes.headers);
     resHeaders.set('X-Edge-Proxy', 'ahmed-hosting-worker');
 
