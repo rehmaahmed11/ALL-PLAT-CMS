@@ -37,7 +37,6 @@ export function buildRouter(): Router {
   r.post('/sites/:id/status', sites.setStatus);
   r.post('/sites/:id/check', sites.check);
   r.post('/sites/:id/credentials', sites.rotateCredentials);
-  r.post('/sites/:id/cms-provision', sites.provisionCmsSite);
   r.post('/sites/:id/delete', sites.remove);
   r.get('/sites/:id/preview', sites.preview);
 

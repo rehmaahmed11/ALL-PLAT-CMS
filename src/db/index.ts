@@ -18,17 +18,6 @@ let schemaReady = false;
  */
 const ADDITIVE_MIGRATIONS = [
   'ALTER TABLE deployments ADD COLUMN files INTEGER NOT NULL DEFAULT 0',
-  `CREATE TABLE IF NOT EXISTS cms_instances (
-    site_id TEXT PRIMARY KEY,
-    worker_name TEXT NOT NULL,
-    database_id TEXT NOT NULL DEFAULT '',
-    kv_namespace_id TEXT NOT NULL DEFAULT '',
-    worker_url TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL DEFAULT 'provisioning',
-    error TEXT NOT NULL DEFAULT '',
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-  )`,
 ];
 
 async function runAdditiveMigrations(db: DB): Promise<void> {
