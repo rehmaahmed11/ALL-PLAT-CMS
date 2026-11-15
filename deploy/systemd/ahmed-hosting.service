@@ -1,0 +1,25 @@
+[Unit]
+Description=Ahmed Multi-Tenant Hosting Panel & CMS Runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ahmedhost
+Group=ahmedhost
+WorkingDirectory=/opt/ahmed-hosting
+EnvironmentFile=/etc/ahmed-hosting/platform.env
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning /opt/ahmed-hosting/dist/platform.mjs
+Restart=always
+RestartSec=3
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/ahmed-hosting/data
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

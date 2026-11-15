@@ -1,0 +1,10 @@
+name = "ahmed-hosting-proxy"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+[vars]
+# Set to your private Cloudflare Tunnel origin hostname (never expose Node.js directly)
+ORIGIN_URL = "https://origin.example.com"
+
+# Secret (set via `wrangler secret put ORIGIN_HMAC_SECRET`, never commit plaintext secrets):
+# ORIGIN_HMAC_SECRET = "..."
