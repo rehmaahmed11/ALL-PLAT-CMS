@@ -73,19 +73,6 @@ CREATE TABLE IF NOT EXISTS domains (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_domains_host ON domains(host);
 CREATE INDEX IF NOT EXISTS idx_domains_site ON domains(site_id);
 
--- One isolated CMS deployment and storage pair per managed site.
-CREATE TABLE IF NOT EXISTS cms_instances (
-  site_id          TEXT PRIMARY KEY,
-  worker_name      TEXT NOT NULL,
-  database_id      TEXT NOT NULL DEFAULT '',
-  kv_namespace_id  TEXT NOT NULL DEFAULT '',
-  worker_url       TEXT NOT NULL DEFAULT '',
-  status           TEXT NOT NULL DEFAULT 'provisioning',
-  error             TEXT NOT NULL DEFAULT '',
-  created_at        INTEGER NOT NULL,
-  updated_at        INTEGER NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS deployments (
   id           TEXT PRIMARY KEY,
   site_id      TEXT NOT NULL,
