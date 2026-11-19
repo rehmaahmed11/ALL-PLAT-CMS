@@ -1,19 +1,15 @@
 /**
- * Provisions the upstream AMS CMS as an isolated Cloudflare Worker for a site.
+ * Provisions the bundled AMS CMS as an isolated Cloudflare Worker for a site.
  *
- * A prebuilt single-module CMS Worker ships in templates/ and is exposed to
- * this Worker through ASSETS. The first deployment caches it in KV at
- * cms/template-v1; later sites reuse that copy. A custom repository or URL can
- * override the bundled build, and published fallbacks cover older deployments.
+ * The pinned build ships in templates/ through ASSETS, and is cached in a
+ * versioned KV key. A manually uploaded module or CMS_TEMPLATE_URL may override
+ * it; a versioned panel GitHub fallback covers deployments without ASSETS.
  */
 import type { Env, Site } from '../types.ts';
 import { all, id, one, run } from '../db/index.ts';
-import { getSettings } from './kv.ts';
-import { cmsRepository } from './cms-repository.js';
+import { BUNDLED_CMS_REPOSITORY, BUNDLED_TEMPLATE_FILE, BUNDLED_TEMPLATE_KEY, cmsRepository } from './cms-repository.js';
 import { cleanHost, updateSite, validHost } from './sites.ts';
 import { CfApiError, cfFetch, resolveCfCredentials, type CfCredentials } from './cf.ts';
-
-const DEFAULT_TEMPLATE_KEY = 'cms/template-v1';
 export type CmsInstance = {
   site_id: string;
   worker_name: string;
@@ -62,29 +58,33 @@ async function cf<T>(auth: CfCredentials, path: string, init: RequestInit = {}):
 
 /** KV key the prebuilt CMS Worker module is cached under. */
 export function cmsTemplateKey(env: Env): string {
-  return String(env.CMS_TEMPLATE_KEY ?? DEFAULT_TEMPLATE_KEY).trim() || DEFAULT_TEMPLATE_KEY;
+  return String(env.CMS_TEMPLATE_KEY ?? BUNDLED_TEMPLATE_KEY).trim() || BUNDLED_TEMPLATE_KEY;
 }
 
 /**
- * The panel ships a prebuilt CMS Worker template. A fresh deployment must be
- * able to create a CMS site even when the repository chosen at install time
- * only contains source code, or when GitHub raw URLs are unavailable.
+ * The panel ships a prebuilt CMS Worker. The published filename is versioned
+ * too: an older panel's GitHub copy must not be mistaken for the new build.
  */
 const PANEL_TEMPLATE_REPO = 'rehmaahmed11/AMS-HOSTING-PANEL';
 const PANEL_TEMPLATE_BRANCH = 'main';
-const PANEL_TEMPLATE_PATH = 'templates/cms-template-worker.js';
-const BUNDLED_ASSET_URL = 'https://assets.local/cms-template-worker.js';
+const PANEL_TEMPLATE_PATH = `templates/${BUNDLED_TEMPLATE_FILE}`;
+const BUNDLED_ASSET_URL = `https://assets.local/${BUNDLED_TEMPLATE_FILE}`;
 
 export type CmsTemplateSource = {
   label: string;
   kind: 'assets' | 'url';
   url?: string;
+  /** Known source repository; omitted for arbitrary custom modules. */
+  repository?: string;
 };
 
 export type CmsTemplateInfo = {
   key: string;
   present: boolean;
   bytes: number;
+  /** Recorded source for the cached build, if known. */
+  sourceLabel?: string;
+  repository?: string;
   /** First URL source, kept for the UI and backwards compatibility. */
   fallbackUrl: string;
   fallbackUrls: string[];
@@ -106,37 +106,18 @@ function githubContentsApiUrl(repo: string, ref = ''): string {
 }
 
 /**
- * Ordered template sources. CMS_TEMPLATE_URL pins a custom build first, then
- * the bundled ASSETS copy, the configured repository and the template that
- * ships with this panel. GitHub API URLs return base64 JSON and are decoded
- * below, so they work even when raw.githubusercontent.com is blocked.
+ * Ordered template sources after the KV cache: an explicit URL override, the
+ * bundled build, and the versioned copy published by this panel. A GitHub URL
+ * entered in an older setup did not build its source code on a Worker; that
+ * potentially stale reference must not replace the new bundle on a cache miss.
  */
 export async function cmsTemplateSources(env: Env): Promise<CmsTemplateSource[]> {
   const sources: CmsTemplateSource[] = [];
   const override = String(env.CMS_TEMPLATE_URL ?? '').trim();
-  if (override) sources.push({ label: `CMS_TEMPLATE_URL (${override})`, kind: 'url', url: override });
+  if (override) sources.push({ label: 'CMS_TEMPLATE_URL override', kind: 'url', url: override });
 
   if (env.ASSETS && typeof env.ASSETS.fetch === 'function') {
-    sources.push({ label: 'bundled panel template (ASSETS)', kind: 'assets' });
-  }
-
-  let configuredRepo = '';
-  try {
-    configuredRepo = cmsRepository((await getSettings(env.KV)).cmsRepository);
-  } catch {
-    /* A broken settings row must not hide the bundled fallback. */
-  }
-  if (configuredRepo) {
-    sources.push({
-      label: `${configuredRepo} main/${PANEL_TEMPLATE_PATH}`,
-      kind: 'url',
-      url: githubRawUrl(configuredRepo),
-    });
-    sources.push({
-      label: `${configuredRepo} default branch (GitHub API)`,
-      kind: 'url',
-      url: githubContentsApiUrl(configuredRepo),
-    });
+    sources.push({ label: 'bundled panel template (ASSETS)', kind: 'assets', repository: BUNDLED_CMS_REPOSITORY });
   }
 
   const panelRepo = `https://github.com/${PANEL_TEMPLATE_REPO}`;
@@ -144,11 +125,13 @@ export async function cmsTemplateSources(env: Env): Promise<CmsTemplateSource[]>
     label: `${PANEL_TEMPLATE_REPO} ${PANEL_TEMPLATE_BRANCH}/${PANEL_TEMPLATE_PATH}`,
     kind: 'url',
     url: githubRawUrl(panelRepo, PANEL_TEMPLATE_BRANCH),
+    repository: BUNDLED_CMS_REPOSITORY,
   });
   sources.push({
     label: `${PANEL_TEMPLATE_REPO} ${PANEL_TEMPLATE_BRANCH} (GitHub API)`,
     kind: 'url',
     url: githubContentsApiUrl(panelRepo, PANEL_TEMPLATE_BRANCH),
+    repository: BUNDLED_CMS_REPOSITORY,
   });
   return sources;
 }
@@ -159,10 +142,28 @@ export async function cmsTemplateUrl(env: Env): Promise<string> {
   return sources.find((source) => source.kind === 'url')?.url ?? '';
 }
 
-/**
- * Whether the reusable CMS build is present in the panel KV. The body is only
- * read on demand (it is a few hundred KB), never on a scheduling path.
- */
+type CachedTemplate = { script: string; sourceLabel?: string; repository?: string };
+
+/** Read cache provenance when available; manually uploaded/older values may not have it. */
+async function readCachedTemplate(env: Env, key: string): Promise<CachedTemplate | null> {
+  try {
+    if (typeof env.KV.getWithMetadata === 'function') {
+      const result = await env.KV.getWithMetadata(key, 'text');
+      if (typeof result?.value !== 'string' || !result.value.includes('fetch')) return null;
+      return {
+        script: result.value,
+        sourceLabel: typeof result.metadata?.source === 'string' ? result.metadata.source : undefined,
+        repository: cmsRepository(result.metadata?.repository) || undefined,
+      };
+    }
+    const script = await env.KV.get(key, 'text');
+    return typeof script === 'string' && script.includes('fetch') ? { script } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Report the cached build and its provenance, if one has been recorded. */
 export async function cmsTemplateInfo(env: Env): Promise<CmsTemplateInfo> {
   const key = cmsTemplateKey(env);
   const sources = await cmsTemplateSources(env);
@@ -171,15 +172,12 @@ export async function cmsTemplateInfo(env: Env): Promise<CmsTemplateInfo> {
     .map((source) => source.url!);
   const fallbackUrl = fallbackUrls[0] ?? '';
   const bundled = sources.some((source) => source.kind === 'assets');
-  try {
-    const body = await env.KV.get(key, 'text');
-    if (!body || typeof body !== 'string') {
-      return { key, present: false, bytes: 0, fallbackUrl, fallbackUrls, sources, bundled };
-    }
-    return { key, present: body.includes('fetch'), bytes: body.length, fallbackUrl, fallbackUrls, sources, bundled };
-  } catch {
-    return { key, present: false, bytes: 0, fallbackUrl, fallbackUrls, sources, bundled };
-  }
+  const cached = await readCachedTemplate(env, key);
+  return {
+    key, present: Boolean(cached), bytes: cached?.script.length ?? 0,
+    sourceLabel: cached?.sourceLabel, repository: cached?.repository,
+    fallbackUrl, fallbackUrls, sources, bundled,
+  };
 }
 
 export type LoadedTemplate = {
@@ -187,6 +185,7 @@ export type LoadedTemplate = {
   key: string;
   source: 'kv' | 'bundled' | 'download';
   sourceLabel?: string;
+  repository?: string;
 };
 
 function decodeBase64Text(value: string): string {
@@ -228,9 +227,9 @@ async function fetchTemplateSource(env: Env, source: CmsTemplateSource): Promise
  */
 export async function loadCmsTemplate(env: Env): Promise<LoadedTemplate> {
   const key = cmsTemplateKey(env);
-  const cached = await env.KV.get(key, 'text').catch(() => null);
-  if (typeof cached === 'string' && cached.includes('fetch')) {
-    return { script: cached, key, source: 'kv' };
+  const cached = await readCachedTemplate(env, key);
+  if (cached) {
+    return { ...cached, key, source: 'kv' };
   }
 
   const sources = await cmsTemplateSources(env);
@@ -243,7 +242,9 @@ export async function loadCmsTemplate(env: Env): Promise<LoadedTemplate> {
         continue;
       }
       try {
-        await env.KV.put(key, script, { metadata: { bytes: script.length, source: source.label } });
+        await env.KV.put(key, script, {
+          metadata: { bytes: script.length, source: source.label, repository: source.repository ?? '' },
+        });
       } catch {
         /* best effort: a failed cache write must not fail the deployment */
       }
@@ -252,6 +253,7 @@ export async function loadCmsTemplate(env: Env): Promise<LoadedTemplate> {
         key,
         source: source.kind === 'assets' ? 'bundled' : 'download',
         sourceLabel: source.label,
+        repository: source.repository,
       };
     } catch (err) {
       failures.push(`${source.label}: ${String((err as Error)?.message ?? err).slice(0, 120)}`);
@@ -259,7 +261,7 @@ export async function loadCmsTemplate(env: Env): Promise<LoadedTemplate> {
   }
 
   throw new CmsProvisionError(
-    `The CMS template is not in the panel KV and no fallback source worked. Tried: ${failures.join(' · ').slice(0, 500)}. Redeploy the panel with its ASSETS binding, upload templates/cms-template-worker.js under Cloudflare deployments, or set CMS_TEMPLATE_URL to a bundled Worker module.`,
+    `The CMS template is not in the panel KV and no fallback source worked. Tried: ${failures.join(' · ').slice(0, 500)}. Redeploy the panel with its ASSETS binding, upload templates/${BUNDLED_TEMPLATE_FILE} under Cloudflare deployments, or set CMS_TEMPLATE_URL to a bundled Worker module.`,
   );
 }
 
@@ -315,6 +317,7 @@ async function assignCloudflareDomain(
   env: Env,
   site: Site,
   workerUrl: string,
+  repository?: string,
 ): Promise<{ assignedHost: string; primaryHost: string; isPrimary: boolean }> {
   const assignedHost = cloudflareWorkerHost(workerUrl);
   const customHost = cleanHost(site.primary_host);
@@ -333,6 +336,9 @@ async function assignCloudflareDomain(
     node_url: workerUrl,
     health_url: primaryHost ? `https://${primaryHost}/api/health` : `${workerUrl}/api/health`,
     admin_slug: 'admin-panel',
+    // A custom upload/URL can have no known repository. Never label it as the
+    // bundled CMS merely because an old setup reference happened to say so.
+    repo: repository ?? '',
     ...(isPrimary ? { primary_host: assignedHost } : {}),
   });
 
@@ -352,7 +358,7 @@ async function assignCloudflareDomain(
 
 export async function provisionCms(env: Env, site: Site): Promise<CmsInstance> {
   const auth = await credentials(env);
-  const { script } = await loadCmsTemplate(env);
+  const { script, repository } = await loadCmsTemplate(env);
 
   const existing = await getCmsInstance(env.DB, site.id);
   const stamp = Date.now();
@@ -423,7 +429,7 @@ export async function provisionCms(env: Env, site: Site): Promise<CmsInstance> {
     });
 
     const workerUrl = `https://${workerName}.${subdomain.subdomain}.workers.dev`;
-    const assigned = await assignCloudflareDomain(env, site, workerUrl);
+    const assigned = await assignCloudflareDomain(env, site, workerUrl, repository);
     await run(env.DB, "UPDATE cms_instances SET worker_url=?,status='active',error='',updated_at=? WHERE site_id=?", [workerUrl, Date.now(), site.id]);
     const instance = (await getCmsInstance(env.DB, site.id))!;
     return { ...instance, assigned_host: assigned.assignedHost, primary_host: assigned.primaryHost };

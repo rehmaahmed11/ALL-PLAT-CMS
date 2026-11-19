@@ -26,6 +26,7 @@ import {
 } from '../lib/cf.ts';
 import { cloudflareWorkerHost, cmsTemplateInfo, cmsTemplateKey, pendingCmsInstances, provisionCms } from '../lib/cms-provision.ts';
 import { getSite } from '../lib/sites.ts';
+import { BUNDLED_CMS_REF, BUNDLED_CMS_REPOSITORY, BUNDLED_TEMPLATE_FILE } from '../lib/cms-repository.js';
 
 const MAX_TEMPLATE_BYTES = 24 * 1024 * 1024;
 
@@ -132,22 +133,23 @@ export const page: Handler = async (c) => {
       <h2 style="margin:0">CMS template</h2>
       ${template.present ? badge('cached', 'ok') : template.bundled ? badge('bundled', 'info') : template.fallbackUrls.length ? badge('auto-load', 'info') : badge('upload needed', 'warn')}
     </div>
+    <p class="muted" style="font-size:.85rem;margin-top:10px">Bundled CMS source: <a href="${BUNDLED_CMS_REPOSITORY}" target="_blank" rel="noopener">${BUNDLED_CMS_REPOSITORY}</a> at commit <span class="mono">${BUNDLED_CMS_REF.slice(0, 12)}</span>.</p>
     ${template.present
-      ? h`<p class="muted" style="font-size:.85rem;margin-top:10px">A prebuilt AMS CMS Worker module is cached in the panel KV under <span class="mono">${template.key}</span> (${bytesHuman(template.bytes)}). Every new CMS site is deployed from this one artifact, so nothing is downloaded from GitHub per site.</p>`
-      : h`<p class="muted" style="font-size:.85rem;margin-top:10px">A CMS_TEMPLATE_URL override (if set) or the bundled CMS Worker is used first, then the published fallback sources. Whichever copy succeeds is cached under <span class="mono">${template.key}</span>; every later site reuses it — no download per site.</p>
+      ? h`<p class="muted" style="font-size:.85rem">A Worker module is cached in the panel KV under <span class="mono">${template.key}</span> (${bytesHuman(template.bytes)}). ${template.sourceLabel ? `Source: ${template.sourceLabel}.` : 'Its source was not recorded (it may have been uploaded manually).'} ${template.repository ? `Repository: ${template.repository}.` : ''} New CMS sites reuse this artifact.</p>`
+      : h`<p class="muted" style="font-size:.85rem">A CMS_TEMPLATE_URL override (if set) or the bundled CMS Worker is used first, then the published fallback sources. Whichever copy succeeds is cached under <span class="mono">${template.key}</span>; every later site reuses it — no download per site.</p>
           <p class="muted" style="font-size:.82rem;margin-top:8px">Sources: <span class="mono" style="word-break:break-all">${template.sources.map((source) => source.label).join(' → ')}</span></p>
           <p class="muted" style="font-size:.82rem;margin-top:8px">Want to pin your own build instead? Run <span class="mono">npm run cms:template:build -- https://github.com/OWNER/REPO</span> (Node.js + npm) and upload <span class="mono">dist/cms-template-worker.js</span> below, or run <span class="mono">npm run cms:template:upload</span> from a trusted machine.</p>`}
     <form method="post" action="${P(c, '/cloudflare/template')}" enctype="multipart/form-data" style="margin-top:12px">
       ${csrfInput(c)}
       <div class="field"><label>Upload ${template.present ? 'a replacement build' : 'the built template'}</label>
         <input type="file" name="file" accept=".js,.mjs,text/javascript,application/javascript" required>
-        <p class="hint">Up to 24 MB. The file must be a bundled Worker module such as <span class="mono">dist/cms-template-worker.js</span> or the committed <span class="mono">templates/cms-template-worker.js</span> (it starts with <span class="mono">import</span> or <span class="mono">var</span> and defines <span class="mono">fetch</span>).</p>
+        <p class="hint">Up to 24 MB. The file must be a bundled Worker module such as <span class="mono">dist/cms-template-worker.js</span> or the committed <span class="mono">templates/${BUNDLED_TEMPLATE_FILE}</span> and must define <span class="mono">fetch</span>.</p>
       </div>
       <button class="btn">${raw(icons.upload)} Store template in KV</button>
     </form>
     ${template.present
       ? h`<form method="post" action="${P(c, '/cloudflare/template/delete')}" style="margin-top:10px">${csrfInput(c)}
-          <button class="btn ghost sm" data-confirm="Remove the cached CMS template? Existing sites keep running; new deployments reload the bundled or published template.">${raw(icons.trash)} Remove cached template</button></form>`
+          <button class="btn ghost sm" data-confirm="Remove the cached CMS template? Existing sites keep running; new deployments reload the configured URL, bundled build, or published fallback.">${raw(icons.trash)} Remove cached template</button></form>`
       : ''}
   </div>`;
 
@@ -326,7 +328,7 @@ export const uploadTemplate: Handler = async (c) => {
   if (!/fetch\s*[(:]/.test(text)) {
     return flashRedirect(
       c, credentialsReturnTo(c), 'err',
-      'That does not look like a bundled Worker module. Upload dist/cms-template-worker.js from npm run cms:template:build, or the committed templates/cms-template-worker.js.',
+      `That does not look like a bundled Worker module. Upload dist/cms-template-worker.js from npm run cms:template:build, or the committed templates/${BUNDLED_TEMPLATE_FILE}.`,
     );
   }
   const key = cmsTemplateKey(c.env);

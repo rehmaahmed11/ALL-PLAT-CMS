@@ -16,6 +16,7 @@ import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LocalD1 } from './d1.mjs';
 import { LocalKV } from './kv.mjs';
+import { BUNDLED_TEMPLATE_FILE } from '../src/lib/cms-repository.js';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const dataDir = join(root, 'local', 'data');
@@ -34,10 +35,10 @@ const env = {
   ASSETS: {
     async fetch(request) {
       const url = new URL(request.url);
-      if (!url.pathname.endsWith('/cms-template-worker.js')) {
+      if (url.pathname !== `/${BUNDLED_TEMPLATE_FILE}`) {
         return new Response('Not found', { status: 404 });
       }
-      const script = await readFile(join(root, 'templates', 'cms-template-worker.js'), 'utf8');
+      const script = await readFile(join(root, 'templates', BUNDLED_TEMPLATE_FILE), 'utf8');
       return new Response(script, {
         status: 200,
         headers: { 'content-type': 'application/javascript; charset=utf-8' },

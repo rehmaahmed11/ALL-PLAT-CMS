@@ -486,12 +486,12 @@ Cloudflare API keys in the sidebar connects the panel to your Cloudflare account
   2. Paste the account ID and the token, then press Save & verify. The token is
      sealed with AES-GCM (key in KV, ciphertext in D1) and never appears in the
      audit log, page source or error text.
-  3. The CMS template needs no build step: a prebuilt Worker is bundled with
-     this panel and cached in KV on first use. If it is missing, the panel tries
-     the configured repository and this panel's published GitHub template.
+  3. The CMS template needs no build step: the panel bundles a Worker built from
+     https://github.com/rehmaahmed11/ams-cms-aligned and caches it on first use.
+     If missing, it tries this panel's versioned published GitHub template.
      To pin your own build, run npm run cms:template:build -- https://github.com/OWNER/REPO and upload
      dist/cms-template-worker.js there (or npm run cms:template:upload, which
-     can fall back to the committed templates/cms-template-worker.js).
+     can fall back to the committed templates/cms-template-worker-v2.js).
 Every new CMS site then gets its own Worker, D1 database, KV namespace, an
 assigned workers.dev domain and a */5 cron by itself. Sites created before the
 connection was made are listed on the Cloudflare API keys page and deploy with

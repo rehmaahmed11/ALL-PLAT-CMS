@@ -6,7 +6,7 @@ import { saveSettings, getSettings } from '../lib/kv.ts';
 import { isSecureRequest, clientIp } from '../lib/runtime.ts';
 import { fullPage } from '../ui/layout.ts';
 import { iconMark } from '../ui/mark.ts';
-import { cmsRepository } from '../lib/cms-repository.js';
+import { BUNDLED_CMS_REF, BUNDLED_CMS_REPOSITORY } from '../lib/cms-repository.js';
 import { validateEmail } from './validation.ts';
 
 const INSTALL_CSS = `
@@ -31,7 +31,6 @@ export async function installWizard(
   const url = new URL(request.url);
   const secure = request.headers.get('x-forwarded-proto') === 'https' || url.protocol === 'https:';
   const errors: string[] = [];
-  let repositoryInput = '';
 
   if (request.method === 'POST') {
     const form = await request.formData();
@@ -44,9 +43,6 @@ export async function installWizard(
     const token = String(form.get('token') ?? '').trim();
     const theme = String(form.get('theme') ?? 'auto');
 
-    repositoryInput = String(form.get('cmsRepository') ?? '').trim();
-    const repository = cmsRepository(repositoryInput);
-    if (!repository) errors.push('Enter a public GitHub CMS repository URL such as https://github.com/owner/repo.');
     if (!validateEmail(email)) errors.push('Enter a valid email address.');
     if (!/^[a-z0-9][a-z0-9_.-]{2,31}$/.test(username)) errors.push('Username: 3-32 characters, letters/numbers/._- only.');
     if (password.length < 10) errors.push('Password must be at least 10 characters.');
@@ -63,7 +59,7 @@ export async function installWizard(
       const user = await createUser(env.DB, { email, username, name: name || username, password, role: 'owner' });
       await saveSettings(env.KV, {
         panelName: panelName || 'AMS Cloud Panel',
-        cmsRepository: repository,
+        cmsRepository: BUNDLED_CMS_REPOSITORY,
         installedAt: Date.now(),
         theme: theme === 'light' || theme === 'dark' ? theme : 'auto',
       });
@@ -134,10 +130,8 @@ export async function installWizard(
 
         <hr>
         <h2>3 · CMS template</h2>
-        <div class="field"><label for="cmsRepository">Which GitHub repository should new CMS sites use?</label>
-          <input type="url" id="cmsRepository" name="cmsRepository" required value="${repositoryInput}" placeholder="https://github.com/owner/repo">
-          <p class="hint">Choose a public repository you trust. The panel already ships a bundled CMS Worker, so a source-only repository is fine: on the first deployment it loads that bundled copy (or a published fallback) and caches it for later sites. You can still build and upload a custom module under Cloudflare deployments.${env.CMS_TEMPLATE_URL ? ' This deployment has CMS_TEMPLATE_URL set; that override is tried first.' : ''}</p>
-        </div>
+        <p>By default, new CMS sites use the bundled Worker built from <a href="${BUNDLED_CMS_REPOSITORY}" target="_blank" rel="noopener">${BUNDLED_CMS_REPOSITORY}</a> at commit <span class="mono">${BUNDLED_CMS_REF.slice(0, 12)}</span>.</p>
+        <p class="hint">The panel uses a cached build; it does not compile or automatically update the GitHub repository when a site is created. To use a different compatible CMS, upload its bundled Worker under Cloudflare deployments or set CMS_TEMPLATE_URL.${env.CMS_TEMPLATE_URL ? ' This deployment has CMS_TEMPLATE_URL set; that override is tried first when the cache is empty.' : ''}</p>
         <h2>What you get</h2>
         <div class="list">
           ${[

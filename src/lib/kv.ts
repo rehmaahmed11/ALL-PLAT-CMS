@@ -4,6 +4,8 @@
  * used so the shim stays trivial.
  */
 
+import { BUNDLED_CMS_REPOSITORY } from './cms-repository.js';
+
 export type KV = any;
 
 export async function kvGetJSON<T>(kv: KV, key: string, fallback: T): Promise<T> {
@@ -75,7 +77,7 @@ export type PanelSettings = {
 };
 
 export const DEFAULT_SETTINGS: PanelSettings = {
-  cmsRepository: '',
+  cmsRepository: BUNDLED_CMS_REPOSITORY,
   panelName: 'AMS Cloud Panel',
   tagline: 'Multi-site hosting control panel on Cloudflare Workers',
   publicBase: '',

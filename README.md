@@ -104,11 +104,14 @@ on the site page.
 
 ### Automatic per-site AMS CMS deployments
 
-The first-run installer asks for the public GitHub repository to use as a CMS
-reference. The panel itself ships a prebuilt CMS Worker, so a source-only repo
-is fine. Give the panel Cloudflare API access so each CMS site can create its
-own Worker and isolated data stores; a custom bundled module can still be
-uploaded once.
+The panel ships a Worker built from
+[`rehmaahmed11/ams-cms-aligned`](https://github.com/rehmaahmed11/ams-cms-aligned)
+at commit `73348dfefaaeeeb412f4a2f73f0812ce988e2afc`. The first-run installer
+shows this source; the Worker is already built, not compiled from GitHub whenever
+a site is created. Give the panel Cloudflare API access so each CMS site gets its
+own Worker and isolated data stores. An administrator can still upload a custom
+bundled Worker or set `CMS_TEMPLATE_URL`.
+
 Each new CMS site is deployed automatically and is told exactly which
 Cloudflare `workers.dev` domain was assigned; its first visit to `/install` is
 where you create that site's CMS login. Static sites can still be created by
@@ -126,23 +129,37 @@ build required:
    lives in KV, only the ciphertext in D1, and it never appears in the audit log,
    page source, or error messages. Creating the token just for this panel and
    revoking it later cuts access off instantly.
-3. Nothing to build: the bundled `templates/cms-template-worker.js` is exposed
-   to the Worker through `ASSETS`. On the first deployment the panel loads that
-   copy (unless `CMS_TEMPLATE_URL` pins your own); if it is unavailable it tries
-   the configured repository and this panel's published GitHub template, then
-   caches whichever copy succeeds in KV for every later site. To pin your own
-   build instead, run
-   `npm run cms:template:build -- https://github.com/OWNER/REPO` for an AMS-compatible source tree and upload `dist/cms-template-worker.js` on that
-   page (or `CF_ACCOUNT_ID=... CF_API_TOKEN=... npm run cms:template:upload`;
-   the helper falls back to the committed template when `dist/` is empty, and
-   finds the KV namespace titled `AMS-HOSTING-PANEL`, otherwise set
-   `PANEL_KV_NAMESPACE_ID`). After a CMS upgrade, rebuild and run
-   `npm run cms:template:refresh` to update the committed copy.
+3. Nothing to build: `templates/cms-template-worker-v2.js` is exposed through
+   `ASSETS`. On a cache miss the panel tries `CMS_TEMPLATE_URL` (if set), the
+   bundled build, then this panel's versioned GitHub fallback. It caches the
+   successful build under `cms/template-v2` for later sites. The old
+   `cms/template-v1` cache is left untouched but no longer used by default, so
+   it cannot silently install the previous CMS. Explicit `CMS_TEMPLATE_KEY` or
+   `CMS_TEMPLATE_URL` overrides and manually uploaded templates still take
+   precedence; remove or replace them if they point at the old CMS.
+
+   For another compatible CMS, run
+   `npm run cms:template:build -- https://github.com/OWNER/REPO` and upload
+   `dist/cms-template-worker.js` on that page (or run
+   `CF_ACCOUNT_ID=... CF_API_TOKEN=... npm run cms:template:upload` from a
+   trusted machine). The helper uses the committed template when `dist/` is
+   absent and finds the KV namespace titled `AMS-HOSTING-PANEL`; otherwise set
+   `PANEL_KV_NAMESPACE_ID`. The Cloudflare deployments page shows the cached
+   source when known and lets you remove it.
+
+   To upgrade the bundled CMS, update the pinned ref and version both the cache
+   key and asset filename in `src/lib/cms-repository.js`, then run
+   `npm run cms:template:build` and `npm run cms:template:refresh` and redeploy
+   the panel. Otherwise existing caches may keep serving the previous build.
 4. Create a CMS site. Its Worker, D1 database, KV namespace and cron are
    provisioned from the cached template, and the assigned Cloudflare domain is
    shown on the site Overview with an **assigned** badge. Finish installation at
    `https://<assigned-workers-dev-host>/install`, then sign in at
    `https://<assigned-workers-dev-host>/admin-panel`.
+
+Updating the panel changes the template for **new** deployments; it does not
+replace Workers or migrate data for already deployed sites. The pinned bundle
+also does not follow new commits automatically.
 
 Sites created before the connection existed are listed on the Cloudflare API
 keys and Cloudflare deployments pages with a single *Assign domains* button, so
