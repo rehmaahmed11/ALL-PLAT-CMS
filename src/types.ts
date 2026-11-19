@@ -30,9 +30,9 @@ export type Env = {
   INSECURE_COOKIES?: string;
   /** KV key containing the prebuilt CMS Worker template. Defaults to cms/template-v1. */
   CMS_TEMPLATE_KEY?: string;
-  /** URL the prebuilt CMS template is downloaded from when KV is empty. */
+  /** First URL tried when the bundled/KV CMS template is unavailable. */
   CMS_TEMPLATE_URL?: string;
-  /** Static assets binding, if the deployment bundles one. */
+  /** Static assets binding; holds the bundled CMS Worker template. */
   ASSETS?: any;
 };
 

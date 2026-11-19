@@ -3,7 +3,7 @@ import { h, raw, esc, SafeHtml } from '../lib/http.ts';
 import { icons, type IconName } from './icons.ts';
 import { CSS } from './style.ts';
 
-export type NavItem = { href: string; label: string; icon: IconName; match?: string };
+export type NavItem = { href: string; label: string; icon: IconName; match?: 'exact' | 'self' };
 
 const NAV: Array<{ group?: string; items: NavItem[] }> = [
   {
@@ -34,8 +34,9 @@ const NAV: Array<{ group?: string; items: NavItem[] }> = [
     items: [
       { href: '/team', label: 'Team', icon: 'users' },
       { href: '/apikeys', label: 'API keys', icon: 'key' },
+      { href: '/cloudflare/keys', label: 'Cloudflare API keys', icon: 'key' },
       { href: '/audit', label: 'Audit log', icon: 'shield' },
-      { href: '/cloudflare', label: 'Cloudflare', icon: 'server' },
+      { href: '/cloudflare', label: 'Cloudflare deployments', icon: 'server', match: 'self' },
       { href: '/settings', label: 'Settings', icon: 'cog' },
       { href: '/docs', label: 'Docs', icon: 'book' },
     ],
@@ -88,7 +89,11 @@ export function shell(opts: ShellOpts): Response {
     const items = group.items
       .map((item) => {
         const href = base + item.href;
-        const on = item.match === 'exact' ? path === '/' || path === '' : path === item.href || path.startsWith(item.href + '/');
+        const on = item.match === 'exact'
+          ? path === '/' || path === ''
+          : item.match === 'self'
+            ? path === item.href
+            : path === item.href || path.startsWith(item.href + '/');
         return `<a href="${esc(href)}" class="${on ? 'on' : ''}">${icons[item.icon]}<span>${esc(item.label)}</span></a>`;
       })
       .join('');

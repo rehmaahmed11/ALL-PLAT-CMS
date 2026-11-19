@@ -26,7 +26,16 @@ if (!namespace) {
     process.exit(1);
   }
 }
-const script = await readFile(file);
+let script;
+let sourceFile = file;
+try {
+  script = await readFile(file);
+} catch {
+  // A fresh checkout has the committed bundled template even before anyone
+  // runs cms:template:build. Use it so the one-time upload needs no build step.
+  sourceFile = join(root, 'templates', 'cms-template-worker.js');
+  script = await readFile(sourceFile);
+}
 const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(account)}/storage/kv/namespaces/${encodeURIComponent(namespace)}/values/${encodeURIComponent(key)}`;
 const response = await fetch(url, {
   method: 'PUT',
@@ -42,4 +51,4 @@ if (!response.ok || body?.success === false) {
   console.error(`Cloudflare KV upload failed (HTTP ${response.status})${errors ? `: ${errors}` : ''}`);
   process.exit(1);
 }
-console.log(`Uploaded ${script.byteLength} bytes as KV key ${key}. New site deployments can now reuse the cached CMS template.`);
+console.log(`Uploaded ${script.byteLength} bytes from ${sourceFile.replace(root + '/', '')} as KV key ${key}. New site deployments can now reuse the cached CMS template.`);

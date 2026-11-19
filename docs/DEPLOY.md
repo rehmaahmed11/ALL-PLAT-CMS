@@ -143,31 +143,39 @@ ignored and should not be committed.
 The build helper is for compatible AMS CMS source trees; pass the same repository
 as in the installer (or set `CMS_REPOSITORY` locally). For another CMS, use its
 own build process to produce a single compatible Worker module. Upload it under
-System → Cloudflare or publish it at the path above. A cached or uploaded module
-is used first; on cache miss `CMS_TEMPLATE_URL` overrides the repository URL.
-Older panels without a saved repository can keep their cached template, upload
-a replacement, or configure `CMS_TEMPLATE_URL` for automatic downloads.
+Cloudflare deployments or publish it at the path above. A fresh panel does not
+need any of this: the committed `templates/cms-template-worker.js` is bound as
+`ASSETS` and, unless `CMS_TEMPLATE_URL` pins a custom build, is used first. On
+a cache miss the panel tries `CMS_TEMPLATE_URL`, the configured repository's
+raw/API endpoints, and this panel's published GitHub template. Older panels
+without a saved repository can keep their cached
+template, upload a replacement, or configure `CMS_TEMPLATE_URL`.
 
-Then connect the panel to Cloudflare: open **System → Cloudflare** in the panel,
+Then connect the panel to Cloudflare: open **Cloudflare API keys** in the sidebar,
 paste the 32-character account ID and an API token with Workers Scripts edit, D1
 edit, KV edit, and Workers account settings read access, and press *Save &
 verify*. The panel verifies the token, the account and the workers.dev subdomain
 before storing the token sealed with AES-GCM (key in KV, ciphertext in D1). The
-same page accepts `dist/cms-template-worker.js` as an upload, so step 3 above can
-also be done from the browser.
+same page accepts `dist/cms-template-worker.js` (or the committed
+`templates/cms-template-worker.js`) as an upload, so step 3 above can also be
+done from the browser.
 
 If you would rather keep the token out of the database, set `CF_ACCOUNT_ID` and
 `CF_API_TOKEN` as Worker secrets with `wrangler secret put` (or the dashboard);
 Worker secrets always win over values saved in the panel.
 
-Then create a site with kind **CMS**. Sites created before the connection was
-made are listed on the Cloudflare page and deploy with one *Retry* click. The panel provisions an
-isolated child Worker and databases, sets it as the site's origin, and the
-existing domain route proxies traffic to it. Complete the CMS's first-run
-installer at `/install`; after installation the admin is at `/admin-panel`.
+Then create a site with kind **CMS**. The panel provisions an isolated child
+Worker and databases, assigns its `<worker>.<account>.workers.dev` hostname as
+the site's primary host, and shows that assignment on the site Overview. Sites
+created before the connection was made are listed on the Cloudflare API keys
+page and deploy with one *Assign domains* click. A custom domain can replace the
+primary host later; the assigned Cloudflare address stays visible. Complete the
+CMS's first-run installer at `/install`; after installation the admin is at
+`/admin-panel`.
 
-Provisioning cannot happen until both the master template is in the panel KV
-and the panel Worker has those Cloudflare credentials. The API token is
+Provisioning needs Cloudflare credentials plus one usable template source. The
+bundled asset, a KV cache, an uploaded module and the GitHub fallbacks all
+qualify. The API token is
 privileged; do not commit it or share it in chat. Each site consumes separate
 Cloudflare resources and is subject to your account's D1/KV/Worker limits.
 Deleting a managed site also deletes its child Worker, D1 database, and KV

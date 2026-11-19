@@ -5,7 +5,7 @@
  *
  *   1. Worker secrets `CF_ACCOUNT_ID` + `CF_API_TOKEN` — best practice, set with
  *      `wrangler secret put` or the dashboard. Nothing is stored in the panel.
- *   2. Values saved from the panel UI (System → Cloudflare). Storing a
+ *   2. Values saved from the panel UI (Cloudflare API keys). Storing a
  *      privileged token in the panel is a compromise that makes setup possible
  *      without a terminal, so the token is never kept in plain text:
  *        - the AES-256-GCM key lives in KV (`panel:keyring`),

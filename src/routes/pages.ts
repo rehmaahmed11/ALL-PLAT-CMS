@@ -138,6 +138,7 @@ export const dashboard: Handler = async (c) => {
             <a class="btn ghost" style="justify-content:flex-start" href="${P(c, '/sites/new')}">${raw(icons.plus)} New site</a>
             <a class="btn ghost" style="justify-content:flex-start" href="${P(c, '/backups')}">${raw(icons.database)} Back up everything</a>
             <a class="btn ghost" style="justify-content:flex-start" href="${P(c, '/deployments')}">${raw(icons.rocket)} Upload a static bundle</a>
+            <a class="btn ghost" style="justify-content:flex-start" href="${P(c, '/cloudflare/keys')}">${raw(icons.key)} Cloudflare API keys</a>
             <a class="btn ghost" style="justify-content:flex-start" href="${P(c, '/export')}">${raw(icons.download)} Export panel JSON</a>
           </div>
         </div>
@@ -163,9 +164,10 @@ export const onboarding: Handler = async (c) => {
     <div class="grid g2">
       <div class="card">
         <h2>1 · Add a site</h2>
-        <p class="muted">Every site gets its own admin path, credentials, environment variables and deployment history.</p>
+        <p class="muted">Every site gets its own admin path, credentials, environment variables and deployment history. Attach Cloudflare keys first and a <span class="mono">workers.dev</span> domain is assigned automatically.</p>
         <p class="mono" style="font-size:.82rem;background:var(--bg2);padding:10px;border-radius:9px">https://your-domain.com<b>/${'<admin-slug>'}</b></p>
-        <a class="btn primary" href="${P(c, '/sites/new')}">Create a site</a>
+        <div class="actions"><a class="btn primary" href="${P(c, '/sites/new')}">Create a site</a>
+        <a class="btn ghost" href="${P(c, '/cloudflare/keys')}">${raw(icons.key)} Attach Cloudflare API keys</a></div>
       </div>
       <div class="card">
         <h2>2 · Point DNS at this Worker</h2>

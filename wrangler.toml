@@ -22,12 +22,21 @@ database_name = "AMS-HOSTING-PANEL"
 [[kv_namespaces]]
 binding = "KV"
 
+# The bundled CMS Worker template ships with the panel. It is available to the
+# Worker through ASSETS, so a fresh deployment can create CMS sites even when
+# the repository chosen during setup has no prebuilt template. Worker code runs
+# first, so the asset is not publicly served as a panel route.
+[assets]
+directory = "./templates"
+binding = "ASSETS"
+run_worker_first = true
+
 # Optional: cron for uptime checks / scheduled publishes / housekeeping.
 [triggers]
 crons = ["*/10 * * * *"]
 
 # Automatic per-site CMS deployments. Two ways to configure, in priority order:
-#   1. System -> Cloudflare in the panel: paste the account ID and an API token
+#   1. Cloudflare API keys in the sidebar: paste the account ID and an API token
 #      (Workers Scripts edit, D1 edit, KV edit, account settings read). The token
 #      is stored AES-GCM sealed - key in KV, ciphertext in D1 - and the panel also
 #      accepts dist/cms-template-worker.js as an upload.
@@ -35,9 +44,10 @@ crons = ["*/10 * * * *"]
 #        CF_ACCOUNT_ID  -> Worker variable or secret
 #        CF_API_TOKEN   -> Worker secret (Workers Scripts, D1, KV edit + account
 #                          settings read)
-#      The CMS template is downloaded once from templates/cms-template-worker.js
-#      on main in the public GitHub repository chosen at setup and cached in the bound KV namespace as
-#      cms/template-v1; CMS_TEMPLATE_URL overrides where it comes from.
+#      CMS_TEMPLATE_URL, when set, pins a custom build; otherwise the bundled
+#      ASSETS copy is loaded and cached in KV as cms/template-v1. When KV and
+#      ASSETS are empty, the panel tries the configured repository and this
+#      panel's published template on GitHub.
 
 # Optional custom domain for the panel itself.
 # [[routes]]

@@ -29,6 +29,21 @@ const env = {
   PANEL_SETUP_TOKEN: process.env.PANEL_SETUP_TOKEN ?? '',
   PANEL_NAME: process.env.PANEL_NAME ?? '',
   INSECURE_COOKIES: '1',
+  // Local stand-in for the Wrangler [assets] binding. The Worker asks for the
+  // bundled CMS module by path; no filesystem access is needed in production.
+  ASSETS: {
+    async fetch(request) {
+      const url = new URL(request.url);
+      if (!url.pathname.endsWith('/cms-template-worker.js')) {
+        return new Response('Not found', { status: 404 });
+      }
+      const script = await readFile(join(root, 'templates', 'cms-template-worker.js'), 'utf8');
+      return new Response(script, {
+        status: 200,
+        headers: { 'content-type': 'application/javascript; charset=utf-8' },
+      });
+    },
+  },
 };
 
 let worker;

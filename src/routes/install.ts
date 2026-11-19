@@ -136,7 +136,7 @@ export async function installWizard(
         <h2>3 · CMS template</h2>
         <div class="field"><label for="cmsRepository">Which GitHub repository should new CMS sites use?</label>
           <input type="url" id="cmsRepository" name="cmsRepository" required value="${repositoryInput}" placeholder="https://github.com/owner/repo">
-          <p class="hint">Choose a public repository you trust. On the first CMS deployment, the panel downloads templates/cms-template-worker.js from its main branch and caches it for later sites. If the repo only contains source code, build the Worker separately and upload it under System → Cloudflare.${env.CMS_TEMPLATE_URL ? ' This deployment has CMS_TEMPLATE_URL set; that override takes priority for downloads.' : ''}</p>
+          <p class="hint">Choose a public repository you trust. The panel already ships a bundled CMS Worker, so a source-only repository is fine: on the first deployment it loads that bundled copy (or a published fallback) and caches it for later sites. You can still build and upload a custom module under Cloudflare deployments.${env.CMS_TEMPLATE_URL ? ' This deployment has CMS_TEMPLATE_URL set; that override is tried first.' : ''}</p>
         </div>
         <h2>What you get</h2>
         <div class="list">
@@ -147,6 +147,7 @@ export async function installWizard(
             ['Uptime monitoring', 'Health checks every 10 minutes plus on-demand, with latency sparklines and 24h uptime.'],
             ['DNS verification', 'Live DNS-over-HTTPS checks and per-domain TXT ownership verification.'],
             ['Audit trail', 'Every change is attributed to a user, with IP and timestamp.'],
+            ['Cloudflare API keys', 'Attach keys once from the sidebar; every CMS site gets an assigned workers.dev domain automatically.'],
           ].map(
             ([title, text]) => h`<div class="item">
               <span class="feat">${raw(icons('check'))}</span>
