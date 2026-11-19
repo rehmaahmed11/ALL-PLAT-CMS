@@ -293,11 +293,8 @@ export async function cfFetch<T>(auth: CfCredentials, path: string, init: Reques
  * Throws CfApiError with an actionable message when they do not.
  */
 export async function verifyCfCredentials(auth: CfCredentials): Promise<CfVerifyResult> {
-  const verify = await cfFetch<{ status?: string }>(auth, '/user/tokens/verify');
-  const tokenStatus = String(verify?.status ?? 'unknown');
-  if (tokenStatus !== 'active') {
-    throw new CfApiError(`Cloudflare reports the token status as "${tokenStatus}", not active. Create a new token.`);
-  }
+  // Check the account resource we actually need. /user/tokens/verify is
+  // specific to user-owned tokens and can reject active account-owned tokens.
   // The account name is cosmetic: a token without "Account Settings: Read"
   // can still deploy Workers, so never fail verification over it.
   let accountName = '';
@@ -315,5 +312,5 @@ export async function verifyCfCredentials(auth: CfCredentials): Promise<CfVerify
       'This Cloudflare account has no workers.dev subdomain. Enable one in the dashboard (Workers & Pages → Settings) — CMS sites are served from it until custom domains attach.',
     );
   }
-  return { tokenStatus, accountName, subdomain: String(subdomain.subdomain) };
+  return { tokenStatus: 'active', accountName, subdomain: String(subdomain.subdomain) };
 }
