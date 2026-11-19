@@ -28,9 +28,9 @@ export type Env = {
   CF_API_TOKEN?: string;
   /** Optional: force cookie `Secure` flag off for local http previews. */
   INSECURE_COOKIES?: string;
-  /** KV key containing the prebuilt CMS Worker template. Defaults to cms/template-v1. */
+  /** KV key containing the prebuilt CMS Worker template. Defaults to cms/template-v2. */
   CMS_TEMPLATE_KEY?: string;
-  /** First URL tried when the bundled/KV CMS template is unavailable. */
+  /** Optional URL tried on a cache miss, before the bundled CMS template. */
   CMS_TEMPLATE_URL?: string;
   /** Static assets binding; holds the bundled CMS Worker template. */
   ASSETS?: any;

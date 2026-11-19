@@ -112,53 +112,61 @@ one from a folder.
 
 ## Automatic CMS deployments per site
 
-The panel can deploy the AMS CMS repository as a separate Worker for each CMS
-site. The first-run installer asks for a public GitHub repository URL. The panel
-fetches the bundled Worker at `main/templates/cms-template-worker.js` from that
-repository on first CMS deployment (it does not compile source) and caches it in
-the panel's KV; later sites reuse that module instead of downloading GitHub
-again. Every instance receives its own D1 database and KV namespace, and the
-admin path is fixed at `/admin-panel`. New site storage uses the same name for
-both resources: `<SITE-NAME>-AMS-HOSTING-PANEL`. For example, `Amazon` creates
-`AMAZON-AMS-HOSTING-PANEL` in both D1 and KV. The site name is uppercased,
-spaces and punctuation become hyphens, and the prefix is shortened if needed.
-Choose distinct names after normalization. Existing resources stay bound by ID;
-renaming a site does not rename its storage.
+The panel deploys a prebuilt Worker from
+[`rehmaahmed11/ams-cms-aligned`](https://github.com/rehmaahmed11/ams-cms-aligned)
+(commit `73348dfefaaeeeb412f4a2f73f0812ce988e2afc`) as a separate Worker for
+each CMS site. The installer shows the bundled source; it does not compile a
+repository at runtime or automatically pull later commits. The build is cached in
+the panel's KV for later sites. Each instance receives its own D1 database and
+KV namespace; the suggested admin path is `/admin-panel`. New site storage uses
+the same name for both resources: `<SITE-NAME>-AMS-HOSTING-PANEL`. For example,
+`Amazon` creates `AMAZON-AMS-HOSTING-PANEL` in both D1 and KV. The site name
+is uppercased, spaces and punctuation become hyphens, and the prefix is
+shortened if needed. Choose distinct names after normalization. Existing
+resources stay bound by ID; renaming a site does not rename its storage.
 
-One-time template preparation from a trusted machine:
+No preparation is needed for the bundled build. The versioned
+`templates/cms-template-worker-v2.js` is bound as `ASSETS`; on a cache miss the
+panel tries `CMS_TEMPLATE_URL` if set, the bundled build, and this panel's
+versioned GitHub fallback. The successful module is cached at `cms/template-v2`.
+This new key intentionally ignores the old `cms/template-v1` build, without
+deleting it or changing already deployed sites. A custom `CMS_TEMPLATE_KEY`,
+`CMS_TEMPLATE_URL`, or uploaded template can still override the default; remove
+or replace old overrides to use the bundled CMS.
+
+To build and upload another **compatible** AMS CMS source tree from a trusted
+machine:
 
 ```bash
 npm install
-npm run cms:template:build -- https://github.com/OWNER/REPO
+npm run cms:template:build -- https://github.com/OWNER/REPO  # optional second argument: branch/tag/SHA
 CF_ACCOUNT_ID=<account-id> CF_API_TOKEN=<token> npm run cms:template:upload
 ```
 
-The upload helper looks for the panel KV namespace titled
-`AMS-HOSTING-PANEL`. If the namespace has another title, also set
-`PANEL_KV_NAMESPACE_ID`. The template build fetches the public AMS CMS
-repository on `main`, applies the reverse-proxy host forwarding shim, and emits
-`dist/cms-template-worker.js`; run the upload after the build. `dist/` is
-ignored and should not be committed.
+The build helper applies the reverse-proxy host forwarding shim and emits
+`dist/cms-template-worker.js` (ignored by Git). It defaults to the pinned
+aligned CMS revision; another repository defaults to `main`, or accepts an
+explicit ref. A different CMS needs its own process producing a compatible
+single Worker module. The upload helper looks for the panel KV namespace titled
+`AMS-HOSTING-PANEL`; if it has another title, set `PANEL_KV_NAMESPACE_ID`.
+Alternatively, upload the module on the Cloudflare deployments page. A cached
+module takes priority even if `CMS_TEMPLATE_URL` changes, so remove the cached
+module there when switching sources.
 
-The build helper is for compatible AMS CMS source trees; pass the same repository
-as in the installer (or set `CMS_REPOSITORY` locally). For another CMS, use its
-own build process to produce a single compatible Worker module. Upload it under
-Cloudflare deployments or publish it at the path above. A fresh panel does not
-need any of this: the committed `templates/cms-template-worker.js` is bound as
-`ASSETS` and, unless `CMS_TEMPLATE_URL` pins a custom build, is used first. On
-a cache miss the panel tries `CMS_TEMPLATE_URL`, the configured repository's
-raw/API endpoints, and this panel's published GitHub template. Older panels
-without a saved repository can keep their cached
-template, upload a replacement, or configure `CMS_TEMPLATE_URL`.
+To update the bundled build itself, update the source/ref and version both
+`BUNDLED_TEMPLATE_KEY` and `BUNDLED_TEMPLATE_FILE` in
+`src/lib/cms-repository.js`, then run `npm run cms:template:build` and
+`npm run cms:template:refresh` and redeploy the panel. The refresh command
+checks that the build matches the pinned source. Versioning avoids reusing old
+KV values or an older published fallback.
 
 Then connect the panel to Cloudflare: open **Cloudflare API keys** in the sidebar,
 paste the 32-character account ID and an API token with Workers Scripts edit, D1
 edit, KV edit, and Workers account settings read access, and press *Save &
 verify*. The panel verifies the token, the account and the workers.dev subdomain
 before storing the token sealed with AES-GCM (key in KV, ciphertext in D1). The
-same page accepts `dist/cms-template-worker.js` (or the committed
-`templates/cms-template-worker.js`) as an upload, so step 3 above can also be
-done from the browser.
+Cloudflare deployments page accepts `dist/cms-template-worker.js` (or the
+committed `templates/cms-template-worker-v2.js`) as an optional upload.
 
 If you would rather keep the token out of the database, set `CF_ACCOUNT_ID` and
 `CF_API_TOKEN` as Worker secrets with `wrangler secret put` (or the dashboard);

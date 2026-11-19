@@ -11,17 +11,25 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 
-import { cmsRepository } from '../src/lib/cms-repository.js';
+import { BUNDLED_CMS_REF, BUNDLED_CMS_REPOSITORY, cmsRepository } from '../src/lib/cms-repository.js';
 
-const repo = cmsRepository(process.argv[2] || process.env.CMS_REPOSITORY);
+const requestedRepo = process.argv[2] || process.env.CMS_REPOSITORY || BUNDLED_CMS_REPOSITORY;
+const repo = cmsRepository(requestedRepo);
 if (!repo) throw new Error('Pass a public GitHub CMS repository: npm run cms:template:build -- https://github.com/owner/repo');
+// The default is pinned so the checked-in template can be reproduced exactly.
+// A different repository defaults to main unless an explicit ref is supplied.
+const ref = process.argv[3] || process.env.CMS_REF ||
+  (repo.toLowerCase() === BUNDLED_CMS_REPOSITORY.toLowerCase() ? BUNDLED_CMS_REF : 'main');
+if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]*$/.test(ref) || ref.includes('..')) {
+  throw new Error('Invalid CMS ref. Use a Git branch, tag or commit SHA.');
+}
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const tmp = mkdtempSync(join(tmpdir(), 'ams-cms-template-'));
 const archive = join(tmp, 'repo.tar.gz');
 const project = join(tmp, 'repo');
 const outDir = join(root, 'dist');
 const outFile = join(outDir, 'cms-template-worker.js');
-const sourceUrl = `${repo.replace('https://github.com/', 'https://codeload.github.com/')}/tar.gz/refs/heads/main`;
+const sourceUrl = `${repo.replace('https://github.com/', 'https://codeload.github.com/')}/tar.gz/${encodeURIComponent(ref)}`;
 
 try {
   mkdirSync(project, { recursive: true });
@@ -66,6 +74,7 @@ try {
     },
     external: ['node:*', 'cloudflare:*'],
     minify: true,
+    banner: { js: `/* CMS template source: ${repo} @ ${ref} */` },
     legalComments: 'none',
     logLevel: 'warning',
     metafile: true,

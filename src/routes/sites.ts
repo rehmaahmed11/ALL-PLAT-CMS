@@ -15,7 +15,7 @@ import { audit } from '../lib/audit.ts';
 import { errText } from '../lib/runtime.ts';
 import { serveBundlePath } from './public.ts';
 import { cloudflareWorkerHost, cmsTemplateInfo, deleteCmsInstance, getCmsInstance, provisionCms } from '../lib/cms-provision.ts';
-import { getSettings } from '../lib/kv.ts';
+import { BUNDLED_CMS_REPOSITORY } from '../lib/cms-repository.js';
 import { getCfStatus } from '../lib/cf.ts';
 
 function flash(c: Ctx): Ctx {
@@ -137,9 +137,9 @@ export const newForm: Handler = async (c) => {
                       The site will still be created with a pending Cloudflare domain — no data is lost.</div></div></div>
                 <a class="btn sm" href="${P(c, !cf.configured ? '/cloudflare/keys' : '/cloudflare')}" style="margin-bottom:12px">${raw(icons.shieldcheck)} ${!cf.configured ? 'Attach Cloudflare API keys' : 'Finish template setup'}</a>
               </div>`}
-          <p class="muted" style="font-size:.84rem">CMS sites reuse the cached build from the AMS CMS repository. Each site receives its own Worker, D1 database and KV namespace; its admin URL is <span class="mono">/admin-panel</span>.</p>
+          <p class="muted" style="font-size:.84rem">By default, CMS sites use the bundled build from <a href="${BUNDLED_CMS_REPOSITORY}" target="_blank" rel="noopener">${BUNDLED_CMS_REPOSITORY}</a>. Each site gets its own Worker, D1 database and KV namespace; its admin URL is <span class="mono">/admin-panel</span>.</p>
 
-          <p class="hint">The master template is built and cached once. New websites do not download the repository again. Connect Cloudflare; the panel downloads the configured module on first use, or you can upload it.</p>
+          <p class="hint">The build is cached and is not rebuilt from GitHub for each site. A manually uploaded template or CMS_TEMPLATE_URL can override the bundled build; see <a href="${P(c, '/cloudflare')}">Cloudflare deployments</a> for the active template.</p>
         </div>
 
         <div class="card">
@@ -187,7 +187,6 @@ export const create: Handler = async (c) => {
       kind,
       primaryHost: String(f.get('host') ?? ''),
       adminSlug: kind === 'cms' ? 'admin-panel' : undefined,
-      repo: kind === 'cms' ? (await getSettings(c.env.KV)).cmsRepository : '',
       notes: String(f.get('notes') ?? '').trim(),
       ownerId: c.user!.id,
     });

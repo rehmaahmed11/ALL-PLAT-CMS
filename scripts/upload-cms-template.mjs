@@ -3,13 +3,14 @@
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { BUNDLED_TEMPLATE_FILE, BUNDLED_TEMPLATE_KEY } from '../src/lib/cms-repository.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const account = String(process.env.CF_ACCOUNT_ID ?? '').trim();
 const token = String(process.env.CF_API_TOKEN ?? '').trim();
 let namespace = String(process.env.PANEL_KV_NAMESPACE_ID ?? '').trim();
 const file = join(root, 'dist', 'cms-template-worker.js');
-const key = String(process.env.CMS_TEMPLATE_KEY ?? 'cms/template-v1').trim();
+const key = String(process.env.CMS_TEMPLATE_KEY ?? BUNDLED_TEMPLATE_KEY).trim() || BUNDLED_TEMPLATE_KEY;
 if (!account || !token) {
   console.error('Set CF_ACCOUNT_ID and CF_API_TOKEN in your shell. Do not commit or share the token.');
   process.exit(1);
@@ -33,7 +34,7 @@ try {
 } catch {
   // A fresh checkout has the committed bundled template even before anyone
   // runs cms:template:build. Use it so the one-time upload needs no build step.
-  sourceFile = join(root, 'templates', 'cms-template-worker.js');
+  sourceFile = join(root, 'templates', BUNDLED_TEMPLATE_FILE);
   script = await readFile(sourceFile);
 }
 const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(account)}/storage/kv/namespaces/${encodeURIComponent(namespace)}/values/${encodeURIComponent(key)}`;

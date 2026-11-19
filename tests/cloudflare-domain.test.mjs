@@ -18,7 +18,7 @@ async function freshDb() {
   return db;
 }
 
-function provisionEnv(db, kv = memoryKV({ 'cms/template-v1': 'export default { fetch() {} };' })) {
+function provisionEnv(db, kv = memoryKV({ 'cms/template-v2': 'export default { fetch() {} };' })) {
   return {
     DB: db,
     KV: kv,
@@ -143,6 +143,27 @@ test('the sidebar has a dedicated Cloudflare API keys page that never prints the
   const alias = await worker.fetch(withSession('/_panel/cloudflare/api-keys'), env, ctx());
   assert.equal(alias.status, 200);
   assert.match(await alias.text(), /Cloudflare API keys/);
+});
+
+test('Cloudflare deployments identifies the bundled and cached CMS sources', async () => {
+  const db = await freshDb();
+  const kv = memoryKV();
+  const repository = 'https://github.com/rehmaahmed11/ams-cms-aligned';
+  await kv.put('cms/template-v2', 'export default { fetch() {} };', {
+    metadata: { source: 'bundled panel template (ASSETS)', repository },
+  });
+  const env = await signedInPanel(db, kv);
+  const res = await worker.fetch(withSession('/_panel/cloudflare'), env, ctx());
+  assert.equal(res.status, 200);
+  const html = await res.text();
+  assert.match(html, /Bundled CMS source/);
+  assert.ok(html.includes(repository));
+  assert.match(html, /Source: bundled panel template/);
+  assert.match(html, /Repository: https:\/\/github\.com\/rehmaahmed11\/ams-cms-aligned/);
+
+  await kv.put('cms/template-v2', 'export default { fetch() {} };', { metadata: { uploadedAt: Date.now() } });
+  const custom = await worker.fetch(withSession('/_panel/cloudflare'), env, ctx());
+  assert.match(await custom.text(), /Its source was not recorded/);
 });
 
 test('saving keys from the dedicated page returns to it and stores encrypted credentials', async () => {
