@@ -1,27 +1,6 @@
 #!/usr/bin/env node
-/**
- * Adopt existing Cloudflare resources into wrangler.toml before a deploy.
- *
- * Why this exists — wrangler 4.x ships with hidden `experimental-provision`
- * and `experimental-auto-create` flags that default to `true`. A deploy
- * whose KV binding has no `id` therefore *blindly creates* a namespace
- * titled `<worker>-<binding>` (e.g. `hosting-panel-cms-kv`). When that
- * namespace already exists — the classic partially-completed first deploy —
- * the API answers 10014 and every later deploy fails the same way: the
- * Worker never received its binding, so wrangler's inherit-from-deployed-
- * settings path never activates and it keeps trying to create the namespace
- * again. (D1 escapes this because wrangler looks databases up by name.)
- *
- * What this script does — during `npm install` (postinstall) it uses the
- * same credentials the deploy step will use to list the account's KV
- * namespaces and D1 databases, finds the ones this config refers to, and
- * writes their IDs into wrangler.toml. Wrangler then sees fully-specified
- * bindings, skips provisioning entirely, and the deploy goes through.
- *
- * Contract: best-effort and silent-ish. Without Cloudflare credentials it
- * does nothing; any failure only warns. It must NEVER break `npm install`,
- * so the entry point always exits 0.
- */
+/** Adopt existing IDs on install; on --provision also create missing resources
+ * by exact name and stop deployment if a binding could not be resolved. */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
@@ -58,11 +37,6 @@ export function extractJson(text) {
     }
   }
   throw new Error('no JSON found in output');
-}
-
-/** The title wrangler's auto-provisioner would use (autoProvisionedResourceName). */
-export function autoProvisionedTitle(workerName, binding) {
-  return `${workerName}-${binding.toLowerCase().replaceAll('_', '-')}`;
 }
 
 /**
@@ -200,6 +174,7 @@ function tail(text, max = 300) {
  * Never throws — returns a result object instead.
  */
 export function adopt({
+  provision = false,
   dir = root,
   env = process.env,
   runWrangler,
@@ -218,56 +193,36 @@ export function adopt({
   const inserts = [];
   const notes = [];
 
-  const needKv = plan.missing.some((m) => m.type === 'kv');
-  const needD1 = plan.missing.some((m) => m.type === 'd1');
-
-  const attempt = (label, args) => {
-    try {
-      const res = run(args);
-      if (!res.ok) {
-        errors.push(`${label} failed: ${tail(res.stderr || res.stdout)}`);
-        return null;
-      }
-      return extractJson(res.stdout);
-    } catch (e) {
-      errors.push(`${label} failed: ${e.message}`);
-      return null;
-    }
-  };
-
-  const namespaces = needKv ? attempt('kv namespace list', ['kv', 'namespace', 'list']) : null;
-  const databases = needD1 ? attempt('d1 list', ['d1', 'list', '--json']) : null;
-
   for (const m of plan.missing) {
-    if (m.type === 'kv') {
-      if (!plan.workerName) {
-        errors.push('kv: no `name` in wrangler.toml, cannot derive the namespace title');
-        continue;
+    const kv = m.type === 'kv';
+    const name = kv ? 'AMS-HOSTING-PANEL' : m.databaseName;
+    const command = kv ? ['kv', 'namespace'] : ['d1'];
+    const exec = (args) => {
+      const res = run([...command, ...args]);
+      if (!res.ok) throw new Error(tail(res.stderr || res.stdout));
+      return res.stdout;
+    };
+    const lookup = () => {
+      const rows = extractJson(exec(kv ? ['list'] : ['list', '--json']));
+      const match = rows.find((r) => (kv ? r.title : r.name) === name);
+      return kv ? match?.id : match?.uuid;
+    };
+    try {
+      let id = lookup();
+      if (!id && provision) {
+        exec(['create', name, '--no-update-config']);
+        id = lookup();
+        if (!id) throw new Error('resource ID not found after creation');
       }
-      if (!namespaces) continue;
-      const title = autoProvisionedTitle(plan.workerName, m.binding);
-      const ns = namespaces.find((n) => n?.title === title);
-      if (ns?.id) {
-        inserts.push({ insertAt: m.insertAt, line: `${m.indent}id = "${ns.id}"` });
-        notes.push(`KV namespace "${title}" → id ${ns.id}`);
-      } else {
-        // No collision: wrangler can create this title itself on deploy.
-        log(`${LOG} no existing KV namespace titled "${title}" — deploy will create it`);
+      if (id) {
+        inserts.push({ insertAt: m.insertAt, line: `${m.indent}${kv ? 'id' : 'database_id'} = "${id}"` });
+        notes.push(`${m.binding}: "${name}" → ${id}`);
       }
-    } else {
-      if (!databases) continue;
-      const db = databases.find((d) => d?.name === m.databaseName);
-      if (db?.uuid) {
-        inserts.push({
-          insertAt: m.insertAt,
-          line: `${m.indent}database_id = "${db.uuid}"`,
-        });
-        notes.push(`D1 database "${m.databaseName}" → uuid ${db.uuid}`);
-      } else {
-        log(`${LOG} no existing D1 database named "${m.databaseName}" — deploy will create it`);
-      }
+    } catch (err) {
+      errors.push(`${m.binding} (${name}): ${err.message}`);
     }
   }
+  for (const e of errors) warn(`${LOG} ${e}`);
 
   if (inserts.length > 0) {
     writeFileSync(configPath, applyPatches(text, inserts));
@@ -276,11 +231,7 @@ export function adopt({
     return { status: 'patched', written: inserts.length, errors };
   }
   if (errors.length > 0) {
-    for (const e of errors) warn(`${LOG} ${e}`);
-    warn(
-      `${LOG} left wrangler.toml unchanged — fine unless you are deploying ` +
-        '(if a deploy fails with KV error 10014, log in with `wrangler login` and re-run `npm install`)',
-    );
+    warn(`${LOG} left wrangler.toml unchanged`);
     return { status: 'lookup-failed', written: 0, errors };
   }
   return { status: 'unchanged', written: 0, errors };
@@ -289,13 +240,12 @@ export function adopt({
 const isMain =
   process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
+  const provision = process.argv.includes('--provision');
   try {
-    adopt();
+    const result = adopt({ provision });
+    if (provision && (result.errors.length || result.status === 'no-config')) process.exitCode = 1;
   } catch (err) {
-    console.warn(
-      `${LOG} failed: ${err?.message ?? err} — continuing (install must not break)`,
-    );
+    console.warn(`${LOG} failed: ${err?.message ?? err}`);
+    if (provision) process.exitCode = 1;
   }
-  // Never fail the install over this: adoption is a convenience, not a gate.
-  process.exitCode = 0;
 }

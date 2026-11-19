@@ -7,21 +7,12 @@
  */
 import type { Env, Site } from '../types.ts';
 import { all, one, run } from '../db/index.ts';
+import { getSettings } from './kv.ts';
+import { cmsRepository } from './cms-repository.js';
 import { updateSite } from './sites.ts';
 import { CfApiError, cfFetch, resolveCfCredentials, type CfCredentials } from './cf.ts';
 
 const DEFAULT_TEMPLATE_KEY = 'cms/template-v1';
-/**
- * Prebuilt CMS Worker module committed to this repository
- * (`templates/cms-template-worker.js`, refreshed with
- * `npm run cms:template:build && npm run cms:template:refresh`).
- *
- * It is only used when the panel KV has no template yet, which keeps a fresh
- * deployment working without a local build: connect Cloudflare, create a site,
- * done. The download is cached in KV so it happens at most once per panel.
- */
-const DEFAULT_TEMPLATE_URL =
-  'https://raw.githubusercontent.com/rizwanahmedsora9-pixel/Hosting-Panel-CMS/main/templates/cms-template-worker.js';
 export type CmsInstance = {
   site_id: string;
   worker_name: string;
@@ -64,8 +55,11 @@ export function cmsTemplateKey(env: Env): string {
  * Where the prebuilt template can be downloaded from when KV is empty.
  * Override with the CMS_TEMPLATE_URL variable to pin a different build.
  */
-export function cmsTemplateUrl(env: Env): string {
-  return String(env.CMS_TEMPLATE_URL ?? DEFAULT_TEMPLATE_URL).trim() || DEFAULT_TEMPLATE_URL;
+export async function cmsTemplateUrl(env: Env): Promise<string> {
+  const override = env.CMS_TEMPLATE_URL?.trim();
+  if (override) return override;
+  const repo = cmsRepository((await getSettings(env.KV)).cmsRepository);
+  return repo ? `${repo.replace('https://github.com/', 'https://raw.githubusercontent.com/')}/main/templates/cms-template-worker.js` : '';
 }
 
 /**
@@ -74,7 +68,7 @@ export function cmsTemplateUrl(env: Env): string {
  */
 export async function cmsTemplateInfo(env: Env): Promise<{ key: string; present: boolean; bytes: number; fallbackUrl: string }> {
   const key = cmsTemplateKey(env);
-  const fallbackUrl = cmsTemplateUrl(env);
+  const fallbackUrl = await cmsTemplateUrl(env);
   try {
     const body = await env.KV.get(key, 'text');
     if (!body || typeof body !== 'string') return { key, present: false, bytes: 0, fallbackUrl };
@@ -98,7 +92,8 @@ export async function loadCmsTemplate(env: Env): Promise<LoadedTemplate> {
     return { script: cached, key, source: 'kv' };
   }
 
-  const url = cmsTemplateUrl(env);
+  const url = await cmsTemplateUrl(env);
+  if (!url) throw new CmsProvisionError('No CMS download source configured. Upload a built Worker under System → Cloudflare or set CMS_TEMPLATE_URL.');
   let downloaded = '';
   try {
     const response = await fetch(url, { headers: { 'user-agent': 'AMS-Cloud-Panel template-loader' } });
@@ -187,10 +182,16 @@ export async function provisionCms(env: Env, site: Site): Promise<CmsInstance> {
     let databaseId = current?.database_id || '';
     let kvNamespaceId = current?.kv_namespace_id || '';
 
+    // Preserve the full suffix within the existing 60-character storage-name limit.
+    const storageSuffix = '-AMS-HOSTING-PANEL';
+    const prefix = safeName(site.name.normalize('NFKD').replace(/\p{M}/gu, ''), 60 - storageSuffix.length).toUpperCase();
+    if ((!databaseId || !kvNamespaceId) && !prefix) {
+      throw new CmsProvisionError('Include a letter A–Z or digit in the site name to name its Cloudflare storage.');
+    }
+    const storageName = `${prefix}${storageSuffix}`;
     if (!databaseId) {
-      const dbName = safeName(`ams-cms-${site.slug}-${suffix}`, 60);
       const created = await cf<{ uuid: string }>(auth, `/accounts/${encodeURIComponent(auth.accountId)}/d1/database`, {
-        method: 'POST', body: JSON.stringify({ name: dbName }),
+        method: 'POST', body: JSON.stringify({ name: storageName }),
       });
       if (!created?.uuid) throw new CmsProvisionError('Cloudflare created no D1 database ID.');
       databaseId = created.uuid;
@@ -199,7 +200,7 @@ export async function provisionCms(env: Env, site: Site): Promise<CmsInstance> {
 
     if (!kvNamespaceId) {
       const namespace = await cf<{ id: string }>(auth, `/accounts/${encodeURIComponent(auth.accountId)}/storage/kv/namespaces`, {
-        method: 'POST', body: JSON.stringify({ title: safeName(`ams-cms-${site.slug}-${suffix}`, 60) }),
+        method: 'POST', body: JSON.stringify({ title: storageName }),
       });
       if (!namespace?.id) throw new CmsProvisionError('Cloudflare created no KV namespace ID.');
       kvNamespaceId = namespace.id;

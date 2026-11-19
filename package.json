@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "predeploy": "node scripts/adopt-resources.mjs",
+    "predeploy": "node scripts/adopt-resources.mjs --provision",
     "postinstall": "node scripts/adopt-resources.mjs",
     "local": "node local/server.mjs",
     "build": "node scripts/bundle.mjs",

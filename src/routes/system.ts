@@ -458,11 +458,11 @@ The local runner uses node:sqlite for D1 and a folder for KV.
   npm install
   npx wrangler login
   npx wrangler secret put PANEL_SETUP_TOKEN     # optional but recommended
-  npx wrangler deploy
+  npm run deploy
 Open https://<worker>.workers.dev${c.panelPath} and paste the setup token.
 
-\\\`wrangler deploy\\\` creates the D1 database (ams_cloud_panel) and the KV namespace
-automatically on the first run — no IDs to copy, no credit card.
+Both the D1 database and KV namespace are named AMS-HOSTING-PANEL.
+The deploy command finds or creates them and binds their IDs.
 
 ## 3. Point a site at the Worker
 Option A — Cloudflare zone: add the domain to Cloudflare, then a Custom Domain
@@ -483,8 +483,8 @@ System -> Cloudflare connects the panel to your Cloudflare account:
      sealed with AES-GCM (key in KV, ciphertext in D1) and never appears in the
      audit log, page source or error text.
   3. The CMS template needs no build step: the panel downloads the prebuilt
-     module from templates/cms-template-worker.js once and caches it in KV.
-     To pin your own build, run npm run cms:template:build and upload
+     module from the repository chosen at setup (main/templates/cms-template-worker.js) and caches it in KV.
+     To pin your own build, run npm run cms:template:build -- https://github.com/OWNER/REPO and upload
      dist/cms-template-worker.js there (or npm run cms:template:upload).
 Every new CMS site then gets its own Worker, D1 database, KV namespace and a
 */5 cron by itself. Sites created before the connection was made are listed on

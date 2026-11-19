@@ -12,14 +12,12 @@ workers_dev = true
 
 # ---------------------------------------------------------------------------
 # Storage: all free-plan resources. No R2 (needs a card), no paid plans.
-# On first deploy wrangler creates whatever is missing. To stop it re-creating
-# resources that already exist (KV error 10014), scripts/adopt-resources.mjs
-# runs at `npm install` (postinstall) and writes the existing `database_id`
-# and KV `id` below whenever Cloudflare credentials are available.
+# npm run deploy finds or creates D1 and KV by exact name: AMS-HOSTING-PANEL.
+# Its predeploy hook pins both IDs; KV titles cannot be set directly in TOML.
 # ---------------------------------------------------------------------------
 [[d1_databases]]
 binding = "DB"
-database_name = "ams_cloud_panel"
+database_name = "AMS-HOSTING-PANEL"
 
 [[kv_namespaces]]
 binding = "KV"
@@ -38,7 +36,7 @@ crons = ["*/10 * * * *"]
 #        CF_API_TOKEN   -> Worker secret (Workers Scripts, D1, KV edit + account
 #                          settings read)
 #      The CMS template is downloaded once from templates/cms-template-worker.js
-#      in this repository and cached in the bound KV namespace as
+#      on main in the public GitHub repository chosen at setup and cached in the bound KV namespace as
 #      cms/template-v1; CMS_TEMPLATE_URL overrides where it comes from.
 
 # Optional custom domain for the panel itself.
