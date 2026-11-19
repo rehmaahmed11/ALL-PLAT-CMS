@@ -152,6 +152,7 @@ export const apiKeys: Handler = async (c) => {
   const fresh = q(c, 'new');
   const body = h`
     ${pageHeader('API keys', 'Automate the panel from CI, scripts or another service')}
+    <div class="note" style="margin-bottom:16px"><b>Connecting Cloudflare?</b> These keys call this panel's JSON API. To let the panel assign <span class="mono">workers.dev</span> domains, use <a href="${P(c, '/cloudflare/keys')}">Cloudflare API keys</a> in the sidebar.</div>
     ${fresh
       ? h`<div class="card" style="border-color:rgba(46,204,143,.45);margin-bottom:16px">
           <h3 style="margin-top:0">Copy your new key</h3>
@@ -360,8 +361,9 @@ export const settings: Handler = async (c) => {
         </div>
         <div class="card">
           <h3>Automatic CMS deployment</h3>
-          <p class="muted" style="font-size:.84rem">A Cloudflare API token plus the cached CMS template let the panel create a Worker, D1 database and KV namespace for every new CMS site.</p>
-          <a class="btn sm" href="${P(c, '/cloudflare')}">${raw(icons.server)} Open Cloudflare settings</a>
+          <p class="muted" style="font-size:.84rem">A Cloudflare API token plus the cached CMS template let the panel create a Worker, D1 database and KV namespace — and assign a <span class="mono">workers.dev</span> domain — for every new CMS site.</p>
+          <div class="actions"><a class="btn sm" href="${P(c, '/cloudflare/keys')}">${raw(icons.key)} Cloudflare API keys</a>
+          <a class="btn sm ghost" href="${P(c, '/cloudflare')}">${raw(icons.server)} Deployments</a></div>
         </div>
         <div class="card">
           <h3>Free-plan footprint</h3>
@@ -465,6 +467,8 @@ Both the D1 database and KV namespace are named AMS-HOSTING-PANEL.
 The deploy command finds or creates them and binds their IDs.
 
 ## 3. Point a site at the Worker
+CMS sites do not need this step when Cloudflare API keys are attached: the panel
+assigns a workers.dev domain on creation and shows it on the site Overview.
 Option A — Cloudflare zone: add the domain to Cloudflare, then a Custom Domain
 or route for this Worker. DNS is created automatically.
 Option B — any registrar: CNAME www -> ${host}. Add a TXT record
@@ -476,20 +480,23 @@ _ams-verify.<host> with the token shown on the Domains page to verify ownership.
   with SPA fallback and immutable caching for hashed assets.
 
 ## 5. Automatic per-site CMS deployment
-System -> Cloudflare connects the panel to your Cloudflare account:
+Cloudflare API keys in the sidebar connects the panel to your Cloudflare account:
   1. Create an API token with Workers Scripts:Edit, D1:Edit, KV Storage:Edit
      and Account Settings:Read for that account.
   2. Paste the account ID and the token, then press Save & verify. The token is
      sealed with AES-GCM (key in KV, ciphertext in D1) and never appears in the
      audit log, page source or error text.
-  3. The CMS template needs no build step: the panel downloads the prebuilt
-     module from the repository chosen at setup (main/templates/cms-template-worker.js) and caches it in KV.
+  3. The CMS template needs no build step: a prebuilt Worker is bundled with
+     this panel and cached in KV on first use. If it is missing, the panel tries
+     the configured repository and this panel's published GitHub template.
      To pin your own build, run npm run cms:template:build -- https://github.com/OWNER/REPO and upload
-     dist/cms-template-worker.js there (or npm run cms:template:upload).
-Every new CMS site then gets its own Worker, D1 database, KV namespace and a
-*/5 cron by itself. Sites created before the connection was made are listed on
-that page and deploy with one Retry click. Worker secrets CF_ACCOUNT_ID and
-CF_API_TOKEN, when set, always win over values saved in the panel.
+     dist/cms-template-worker.js there (or npm run cms:template:upload, which
+     can fall back to the committed templates/cms-template-worker.js).
+Every new CMS site then gets its own Worker, D1 database, KV namespace, an
+assigned workers.dev domain and a */5 cron by itself. Sites created before the
+connection was made are listed on the Cloudflare API keys page and deploy with
+one Assign domains click. Worker secrets CF_ACCOUNT_ID and CF_API_TOKEN, when
+set, always win over values saved in the panel.
 
 ## 6. Free-plan guardrails
 - KV value limit 25 MB (panel caps uploads at 24 MB).
@@ -506,8 +513,9 @@ Create keys under API keys. Scopes: read, write.
 
 ## 8. Troubleshooting
 - "No site at this address" — the host is not attached to a site yet.
-- CMS deployment failed — open System -> Cloudflare: it shows the exact reason
-  per site, retries the deployment and checks the token's permissions.
+- CMS deployment failed — open Cloudflare API keys or Cloudflare deployments:
+  they show the exact reason per site, assign pending domains and check the
+  token's permissions.
 - Installer is gone — an owner exists; sign in instead.
 - Restore a backup — Backups -> Restore replaces config, env, domains and pages.
 - Lost the panel path — set PANEL_PATH as a Worker variable and redeploy.

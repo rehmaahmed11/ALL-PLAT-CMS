@@ -8,6 +8,7 @@ import * as content from './content.ts';
 import * as ops from './ops.ts';
 import * as system from './system.ts';
 import * as cloudflare from './cloudflare.ts';
+import * as cloudflareKeys from './cloudflare-keys.ts';
 import * as api from './api.ts';
 
 export function buildRouter(): Router {
@@ -90,6 +91,8 @@ export function buildRouter(): Router {
   r.post('/apikeys/create', system.apiKeyCreate);
   r.post('/apikeys/:id/delete', system.apiKeyDelete);
   r.get('/audit', system.auditPage);
+  r.get('/cloudflare/keys', cloudflareKeys.page);
+  r.get('/cloudflare/api-keys', cloudflareKeys.page);
   r.get('/cloudflare', cloudflare.page);
   r.post('/cloudflare/credentials', cloudflare.saveCredentials);
   r.post('/cloudflare/test', cloudflare.testConnection);
