@@ -112,7 +112,7 @@ export function shell(opts: ShellOpts): Response {
     : h``;
 
   const flash = c.flash
-    ? h`<div class="flash ${c.flash.kind}">${raw(icons[c.flash.kind === 'ok' ? 'check' : c.flash.kind === 'err' ? 'warning' : 'activity'])}<div>${c.flash.text}</div></div>`
+    ? h`<dialog open id="panel-message" class="panel-dialog" aria-label="Panel notification"><div class="flash ${c.flash.kind}">${raw(icons[c.flash.kind === 'ok' ? 'check' : c.flash.kind === 'err' ? 'warning' : 'activity'])}<div>${c.flash.text}</div></div><form method="dialog"><button class="btn">Close</button></form></dialog>`
     : h``;
 
   const user = c.user;
@@ -158,6 +158,7 @@ export function shell(opts: ShellOpts): Response {
       <main class="content">${flash}${body}</main>
     </div>
   </div>
+  <dialog id="panel-confirm" class="panel-dialog" aria-labelledby="confirm-text"><p id="confirm-text"></p><form method="dialog" class="row"><button class="btn" autofocus>Cancel</button><button class="btn primary" value="yes">Continue</button></form></dialog>
   <div class="toast-wrap" id="toasts"></div>
   <script>
   function amsTheme(){
@@ -177,7 +178,24 @@ export function shell(opts: ShellOpts): Response {
   }
   document.addEventListener('click',function(e){
     var b=e.target.closest('[data-copy]'); if(b){amsCopy(b);}
-    var cf=e.target.closest('[data-confirm]'); if(cf && !confirm(cf.getAttribute('data-confirm'))){e.preventDefault();e.stopPropagation();}
+
+  });
+  var msg=document.getElementById('panel-message');
+  if(msg && msg.showModal){msg.close();msg.showModal();}
+  var promptBox=document.getElementById('panel-confirm'), pending=null;
+  document.addEventListener('submit',function(e){
+    var btn=e.submitter;
+    if(!btn || !btn.hasAttribute('data-confirm'))return;
+    if(!promptBox.showModal){if(!confirm(btn.dataset.confirm))e.preventDefault();return;}
+    e.preventDefault();pending=btn;promptBox.returnValue='';
+    document.getElementById('confirm-text').textContent=btn.dataset.confirm;promptBox.showModal();
+  });
+  promptBox.addEventListener('close',function(){
+    var btn=pending;pending=null;
+    if(btn && promptBox.returnValue==='yes'){
+      var text=btn.dataset.confirm;delete btn.dataset.confirm;
+      try{btn.form.requestSubmit(btn)}finally{btn.dataset.confirm=text}
+    }
   });
   </script>`;
 

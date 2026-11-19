@@ -121,7 +121,7 @@ test('verifying credentials reports the account, subdomain and permission proble
     };
     const verified = await verifyCfCredentials({ accountId: ACCOUNT, token: TOKEN, source: 'panel' });
     assert.deepEqual(verified, { tokenStatus: 'active', accountName: 'Acme Ltd', subdomain: 'my-subdomain' });
-    assert.equal(calls[0].path, '/client/v4/user/tokens/verify');
+    assert.deepEqual(calls.map(c => c.path), [`/client/v4/accounts/${ACCOUNT}`, `/client/v4/accounts/${ACCOUNT}/workers/subdomain`]);
     assert.equal(calls[0].auth, `Bearer ${TOKEN}`);
 
     // A token without the Workers permission must produce an actionable error.

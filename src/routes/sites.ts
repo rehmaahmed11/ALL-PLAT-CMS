@@ -203,9 +203,9 @@ export const create: Handler = async (c) => {
         );
       }
       try {
-        await provisionCms(c.env, site);
+        const instance = await provisionCms(c.env, site);
         await audit(c, 'cms.provision', 'site', site.id, { status: 'active' });
-        return flashRedirect(c, P(c, `/sites/${site.id}`), 'ok', `Site created and its isolated CMS deployed. Finish first-time setup at ${site.primary_host ? `https://${site.primary_host}/install` : 'the worker URL + /install'}, then sign in at /admin-panel.`);
+        return flashRedirect(c, P(c, `/sites/${site.id}`), 'ok', `Site created and its isolated CMS deployed. Finish first-time setup at ${instance.worker_url}/install, then sign in at /admin-panel.`);
       } catch (err) {
         await audit(c, 'cms.provision', 'site', site.id, { status: 'error', error: String((err as Error)?.message ?? err).slice(0, 200) });
         return flashRedirect(
@@ -279,8 +279,9 @@ export const detail: Handler = async (c) => {
     body = h`<div class="card tight">
       <div class="card-h"><h3>Domains</h3><div class="spacer"></div>
         <a class="btn sm ghost" href="${P(c, '/domains')}?site=${site.id}">Manage all domains</a></div>
+      ${site.kind === 'cms' ? h`<div class="card-b"><strong>Cloudflare site address</strong><p>${cmsInstance?.status === 'active' && cmsInstance.worker_url ? h`<a href="${cmsInstance.worker_url}" target="_blank" rel="noopener">${cmsInstance.worker_url}</a>` : h`No address yet. <a href="${P(c, `/sites/${site.id}`)}">Open Overview</a> to check the CMS deployment.`}</p></div>` : ''}
       ${domainRows.length === 0
-        ? empty('globe', 'No domains', 'Add the hostname this site answers on.', h`<a class="btn" href="${P(c, `/domains`)}?site=${site.id}">Add a domain</a>`)
+        ? empty('globe', 'No custom domains', 'Add a hostname you own to use it for this site.', h`<a class="btn" href="${P(c, `/domains`)}?site=${site.id}">Add a domain</a>`)
         : h`<table><thead><tr><th>Host</th><th>Type</th><th>Status</th><th>DNS</th><th></th></tr></thead>
             <tbody>${domainRows.map(
               (d) => h`<tr>
@@ -406,7 +407,7 @@ export const detail: Handler = async (c) => {
           </div>
           ${cmsInstance?.status === 'active'
             ? h`<p class="muted" style="font-size:.84rem;margin-top:10px">Deployed from the cached AMS CMS template. This site has its own Worker, D1 database and KV namespace.</p>
-                <p class="mono" style="font-size:.82rem">Worker: ${cmsInstance.worker_name}</p>
+                <p class="mono" style="font-size:.82rem">Worker: <a href="${cmsInstance.worker_url}" target="_blank" rel="noopener">${cmsInstance.worker_url}</a></p>
                 <div class="actions">
                   <a class="btn sm" href="${site.primary_host ? `https://${site.primary_host}/install` : `${cmsInstance.worker_url}/install`}" target="_blank" rel="noopener">Open installer</a>
                   <a class="btn sm ghost" href="${site.primary_host ? `https://${site.primary_host}/admin-panel` : `${cmsInstance.worker_url}/admin-panel`}" target="_blank" rel="noopener">Open /admin-panel</a>

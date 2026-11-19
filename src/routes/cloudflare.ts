@@ -82,11 +82,11 @@ export const page: Handler = async (c) => {
         <input type="text" name="accountId" value="${status.hasEnvAccount ? '' : status.accountId}" placeholder="023e105f4ecef8ad9ca31a8372d0c353" autocapitalize="none" spellcheck="false">
         <p class="hint">${status.hasEnvAccount
           ? 'CF_ACCOUNT_ID is already set as a Worker secret; it is used instead of this field.'
-          : 'Cloudflare dashboard → Workers & Pages → Account ID, or the end of your dashboard URL.'}</p>
+          : 'Copy the 32-character Account ID from Workers & Pages. Do not use your user ID or zone ID.'}</p>
       </div>
       <div class="field"><label>API token</label>
         <input type="password" name="token" placeholder="${status.hasStoredToken ? '•••••• unchanged — paste a new token to replace it' : 'Paste the token you just created'}" autocapitalize="none" spellcheck="false">
-        <p class="hint">Stored encrypted in the panel: the key is held in KV, the sealed token in D1. It is never written to the audit log, page source or error messages.</p>
+        <p class="hint">Use the secret API token value, not its Token ID or the Global API Key. Stored encrypted in the panel: the key is held in KV, the sealed token in D1. It is never written to the audit log, page source or error messages.</p>
       </div>
       <div class="row" style="gap:8px">
         <button class="btn primary">${raw(icons.shieldcheck)} Save &amp; verify</button>
@@ -256,7 +256,7 @@ export const saveCredentials: Handler = async (c) => {
     );
   } catch (err) {
     await audit(c, 'cf.connect', 'panel', null, { account: accountId, status: 'error' });
-    return flashRedirect(c, P(c, '/cloudflare'), 'err', `Cloudflare rejected those credentials: ${errText(err).slice(0, 260)}`);
+    return flashRedirect(c, P(c, '/cloudflare'), 'err', `Cloudflare connection setup failed: ${errText(err).slice(0, 260)}`);
   }
 };
 

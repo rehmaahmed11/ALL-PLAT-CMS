@@ -150,6 +150,9 @@ input::placeholder,textarea::placeholder{color:var(--fg3)}
 
 /* ---------- flash / alerts ---------- */
 .flash{padding:11px 14px;border-radius:10px;margin-bottom:16px;font-size:.9rem;border:1px solid;display:flex;gap:9px;align-items:flex-start}
+.flash > svg{width:20px;height:20px;flex:0 0 20px}
+.panel-dialog{position:fixed;inset:0;margin:auto;width:min(26rem,calc(100vw - 2rem));max-height:80vh;overflow:auto;overflow-wrap:anywhere;padding:18px}
+.panel-dialog p{margin:0 0 16px}
 .flash.ok{border-color:rgba(46,204,143,.4);background:rgba(46,204,143,.10);color:#9ef3cd}
 .flash.err{border-color:rgba(255,95,109,.45);background:rgba(255,95,109,.10);color:#ffbcc0}
 .flash.info{border-color:rgba(56,189,248,.4);background:rgba(56,189,248,.10);color:#b6e7ff}
