@@ -55,7 +55,8 @@ export const page: Handler = async (c) => {
   const pending = await pendingCmsInstances(c.env.DB, 12);
   // A missing template no longer blocks: the prebuilt build is downloaded and
   // cached automatically on the first deployment.
-  const ready = status.configured;
+  const hasTemplateSource = template.present || !!template.fallbackUrl;
+  const ready = status.configured && hasTemplateSource;
 
   const connectionCard = h`<div class="card">
     <div class="row between" style="align-items:flex-start">
@@ -120,13 +121,13 @@ export const page: Handler = async (c) => {
   const templateCard = h`<div class="card" id="template">
     <div class="row between" style="align-items:flex-start">
       <h2 style="margin:0">CMS template</h2>
-      ${template.present ? badge('cached', 'ok') : badge('auto-download', 'info')}
+      ${template.present ? badge('cached', 'ok') : (template.fallbackUrl ? badge('auto-download', 'info') : badge('upload needed', 'warn'))}
     </div>
     ${template.present
       ? h`<p class="muted" style="font-size:.85rem;margin-top:10px">A prebuilt AMS CMS Worker module is cached in the panel KV under <span class="mono">${template.key}</span> (${bytesHuman(template.bytes)}). Every new CMS site is deployed from this one artifact, so nothing is downloaded from GitHub per site.</p>`
-      : h`<p class="muted" style="font-size:.85rem;margin-top:10px">Nothing is cached in KV yet, so the first deployment downloads the prebuilt AMS CMS build once and stores it under <span class="mono">${template.key}</span>. Every later site reuses that copy — no GitHub request per site.</p>
-          <p class="muted" style="font-size:.82rem;margin-top:8px">Source: <span class="mono" style="word-break:break-all">${template.fallbackUrl}</span></p>
-          <p class="muted" style="font-size:.82rem;margin-top:8px">Want to pin your own build instead? Run <span class="mono">npm run cms:template:build</span> (Node.js + npm) and upload <span class="mono">dist/cms-template-worker.js</span> below, or run <span class="mono">npm run cms:template:upload</span> from a trusted machine.</p>`}
+      : h`<p class="muted" style="font-size:.85rem;margin-top:10px">A downloaded or uploaded CMS module is cached under <span class="mono">${template.key}</span>. Every later site reuses that copy — no GitHub request per site.</p>
+          <p class="muted" style="font-size:.82rem;margin-top:8px">Source: <span class="mono" style="word-break:break-all">${template.fallbackUrl || 'No repository saved. Upload a module below or set CMS_TEMPLATE_URL.'}</span></p>
+          <p class="muted" style="font-size:.82rem;margin-top:8px">Want to pin your own build instead? Run <span class="mono">npm run cms:template:build -- https://github.com/OWNER/REPO</span> (Node.js + npm) and upload <span class="mono">dist/cms-template-worker.js</span> below, or run <span class="mono">npm run cms:template:upload</span> from a trusted machine.</p>`}
     <form method="post" action="${P(c, '/cloudflare/template')}" enctype="multipart/form-data" style="margin-top:12px">
       ${csrfInput(c)}
       <div class="field"><label>Upload ${template.present ? 'a replacement build' : 'the built template'}</label>
@@ -174,13 +175,13 @@ export const page: Handler = async (c) => {
         ? `Connected via ${status.source === 'env' ? 'Worker secrets' : 'credentials saved here'}.`
         : 'Not connected yet — nothing can be provisioned.',
         status.configured ? '' : h`<a class="btn sm" href="#connection">Connect</a>`)}
-      ${checkRow(true, '2 · CMS template', template.present
+      ${checkRow(hasTemplateSource, '2 · CMS template', template.present
         ? `Cached in KV (${bytesHuman(template.bytes)}).`
-        : 'Not cached yet — the prebuilt build downloads automatically on the first deployment.',
+        : template.fallbackUrl ? 'Not cached yet — the prebuilt build downloads on the first deployment.' : 'Upload a module or configure CMS_TEMPLATE_URL.',
         template.present ? '' : h`<a class="btn sm ghost" href="#template">Upload your own</a>`)}
       ${checkRow(ready, '3 · Deploy sites', ready
         ? 'Create a CMS site and it deploys automatically.'
-        : 'Connect Cloudflare first.', '')}
+        : 'Connect Cloudflare and configure a CMS template first.', '')}
     </div>
     <div class="split">
       <div class="stack">

@@ -8,7 +8,6 @@ import { join } from 'node:path';
 
 import {
   extractJson,
-  autoProvisionedTitle,
   planPatches,
   applyPatches,
   adopt,
@@ -25,7 +24,7 @@ workers_dev = true
 # ---------------------------------------------------------------------------
 [[d1_databases]]
 binding = "DB"
-database_name = "ams_cloud_panel"
+database_name = "AMS-HOSTING-PANEL"
 
 [[kv_namespaces]]
 binding = "KV"
@@ -42,7 +41,7 @@ main = "src/index.ts"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "ams_cloud_panel"
+database_name = "AMS-HOSTING-PANEL"
 database_id = "11111111-2222-3333-4444-555555555555"
 
 [[kv_namespaces]]
@@ -57,7 +56,7 @@ function fixtureDir(toml) {
 }
 
 test('extractJson survives wrangler banners and warnings', () => {
-  const payload = [{ id: 'ns-1', title: 'hosting-panel-cms-kv' }];
+  const payload = [{ id: 'ns-1', title: 'AMS-HOSTING-PANEL' }];
   const noisy = `⛅️ wrangler 4.162.0\n────────────────────\nGetting User settings…\n${JSON.stringify(payload, null, 2)}\n`;
   assert.deepEqual(extractJson(noisy), payload);
 
@@ -66,14 +65,6 @@ test('extractJson survives wrangler banners and warnings', () => {
 
   assert.deepEqual(extractJson('[{"a":1}]'), [{ a: 1 }]);
   assert.throws(() => extractJson('no json here'));
-});
-
-test('autoProvisionedTitle mirrors wrangler\'s naming', () => {
-  assert.equal(
-    autoProvisionedTitle('hosting-panel-cms', 'KV'),
-    'hosting-panel-cms-kv',
-  );
-  assert.equal(autoProvisionedTitle('panel', 'MY_KV'), 'panel-my-kv');
 });
 
 test('planPatches finds missing kv id and database_id with anchors', () => {
@@ -86,8 +77,8 @@ test('planPatches finds missing kv id and database_id with anchors', () => {
   assert.equal(CONFIG.split('\n')[kv.insertAt], 'binding = "KV"');
 
   const d1 = plan.missing.find((m) => m.type === 'd1');
-  assert.equal(d1.databaseName, 'ams_cloud_panel');
-  assert.equal(CONFIG.split('\n')[d1.insertAt], 'database_name = "ams_cloud_panel"');
+  assert.equal(d1.databaseName, 'AMS-HOSTING-PANEL');
+  assert.equal(CONFIG.split('\n')[d1.insertAt], 'database_name = "AMS-HOSTING-PANEL"');
 });
 
 test('planPatches is empty when every id is present', () => {
@@ -110,7 +101,7 @@ test('applyPatches inserts ids under the right anchors, idempotently', () => {
   assert.ok(kvBlock.includes('id = "ns-kv-1"'));
 
   const d1Idx = patched.indexOf('[[d1_databases]]');
-  assert.match(patched.slice(d1Idx), /database_name = "ams_cloud_panel"\ndatabase_id = "db-uuid-1"/);
+  assert.match(patched.slice(d1Idx), /database_name = "AMS-HOSTING-PANEL"\ndatabase_id = "db-uuid-1"/);
 
   // Everything else is untouched, and a re-plan finds nothing missing.
   assert.ok(patched.includes('crons = ["*/10 * * * *"]'));
@@ -130,7 +121,7 @@ test('adopt patches wrangler.toml from list output', () => {
         return {
           ok: true,
           stdout: JSON.stringify([
-            { id: 'deadbeefcafe0000deadbeefcafe0000', title: 'hosting-panel-cms-kv' },
+            { id: 'deadbeefcafe0000deadbeefcafe0000', title: 'AMS-HOSTING-PANEL' },
             { id: 'other', title: 'something-else' },
           ]),
           stderr: '',
@@ -141,7 +132,7 @@ test('adopt patches wrangler.toml from list output', () => {
         stdout: JSON.stringify([
           {
             uuid: '9481a940-0000-4000-8000-000000000000',
-            name: 'ams_cloud_panel',
+            name: 'AMS-HOSTING-PANEL',
           },
         ]),
         stderr: '',
@@ -153,7 +144,7 @@ test('adopt patches wrangler.toml from list output', () => {
 
   assert.equal(result.status, 'patched');
   assert.equal(result.written, 2);
-  assert.deepEqual(calls, ['kv namespace list', 'd1 list --json']);
+  assert.deepEqual(calls, ['d1 list --json', 'kv namespace list']);
 
   const patched = readFileSync(join(dir, 'wrangler.toml'), 'utf8');
   assert.ok(patched.includes('id = "deadbeefcafe0000deadbeefcafe0000"'));
@@ -179,7 +170,7 @@ test('adopt does nothing when config already has ids (no wrangler calls)', () =>
 });
 
 test('adopt leaves the file untouched when the namespace is absent', () => {
-  // No collision means wrangler can create the namespace itself — not an error.
+  // Install must never create resources.
   const dir = fixtureDir(CONFIG);
   const result = adopt({
     dir,
@@ -231,4 +222,24 @@ test('adopt never throws, even if the runner explodes', () => {
   assert.equal(result.written, 0);
   assert.ok(warnings.some((w) => w.includes('boom')));
   assert.equal(readFileSync(join(dir, 'wrangler.toml'), 'utf8'), CONFIG);
+});
+
+test('predeploy creates missing resources by exact name and binds their IDs', () => {
+  const dir = fixtureDir(CONFIG);
+  const created = new Set();
+  const result = adopt({ dir, provision: true, runWrangler(args) {
+    const kv = args[0] === 'kv';
+    if (args.includes('create')) {
+      assert.deepEqual(args.slice(-3), ['create', 'AMS-HOSTING-PANEL', '--no-update-config']);
+      created.add(args[0]);
+      return { ok: true, stdout: 'Created' };
+    }
+    const row = kv ? { title: 'AMS-HOSTING-PANEL', id: 'new-kv' } : { name: 'AMS-HOSTING-PANEL', uuid: 'new-db' };
+    return { ok: true, stdout: JSON.stringify(created.has(args[0]) ? [row] : []) };
+  } });
+  assert.equal(result.written, 2);
+  assert.deepEqual(result.errors, []);
+  const config = readFileSync(join(dir, 'wrangler.toml'), 'utf8');
+  assert.match(config, /database_id = "new-db"/);
+  assert.match(config, /\nid = "new-kv"/);
 });

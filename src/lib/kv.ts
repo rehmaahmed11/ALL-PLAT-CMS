@@ -63,6 +63,7 @@ export async function clearCounter(kv: KV, key: string): Promise<void> {
  * in KV under one key. D1 is the source of truth for everything relational.
  */
 export type PanelSettings = {
+  cmsRepository: string;
   panelName: string;
   tagline: string;
   publicBase: string;
@@ -74,6 +75,7 @@ export type PanelSettings = {
 };
 
 export const DEFAULT_SETTINGS: PanelSettings = {
+  cmsRepository: '',
   panelName: 'AMS Cloud Panel',
   tagline: 'Multi-site hosting control panel on Cloudflare Workers',
   publicBase: '',

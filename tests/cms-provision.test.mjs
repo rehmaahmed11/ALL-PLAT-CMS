@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { ensureSchema, one, resetSchemaMemo } from '../src/db/index.ts';
 import { createSite } from '../src/lib/sites.ts';
 import { cmsTemplateInfo, loadCmsTemplate, provisionCms } from '../src/lib/cms-provision.ts';
+import { installWizard } from '../src/routes/install.ts';
+import { getSettings } from '../src/lib/kv.ts';
 import { saveCfCredentials } from '../src/lib/cf.ts';
 import { memoryKV } from '../local/kv-memory.mjs';
 import { LocalD1 } from '../local/d1.mjs';
@@ -10,15 +12,20 @@ import { LocalD1 } from '../local/d1.mjs';
 test('provisions an isolated CMS from cached template and records its origin', async () => {
   const db = new LocalD1(':memory:');
   await ensureSchema(db);
-  const site = await createSite(db, { name: 'Site One', kind: 'cms', primaryHost: 'one.example.com' });
+  const site = await createSite(db, { name: 'Amazon', slug: 'shop-one', kind: 'cms', primaryHost: 'one.example.com' });
   const calls = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     calls.push({ url, init });
     let result = {};
-    if (url.pathname.endsWith('/d1/database')) result = { uuid: 'db-isolated-1' };
-    else if (url.pathname.endsWith('/storage/kv/namespaces')) result = { id: 'kv-isolated-1' };
+    if (url.pathname.endsWith('/d1/database')) {
+      assert.deepEqual(JSON.parse(init.body), { name: 'AMAZON-AMS-HOSTING-PANEL' });
+      result = { uuid: 'db-isolated-1' };
+    } else if (url.pathname.endsWith('/storage/kv/namespaces')) {
+      assert.deepEqual(JSON.parse(init.body), { title: 'AMAZON-AMS-HOSTING-PANEL' });
+      result = { id: 'kv-isolated-1' };
+    }
     else if (url.pathname.endsWith('/workers/subdomain')) result = { subdomain: 'account-subdomain' };
     else if (url.pathname.endsWith('/subdomain')) {
       assert.equal(init.method, 'POST');
@@ -113,6 +120,13 @@ test('an empty template cache downloads the prebuilt build once and stores it in
   await ensureSchema(db);
   const kv = memoryKV();
   const env = { DB: db, KV: kv, CF_ACCOUNT_ID: 'f'.repeat(32), CF_API_TOKEN: 'install-token-0123456789abcdef' };
+  const install = (repository) => installWizard(new Request('https://panel.example/_panel/install', {
+    method: 'POST', body: new URLSearchParams({ cmsRepository: repository, email: 'owner@example.com', username: 'owner', password: 'safe-password123', password2: 'safe-password123' }),
+  }), env, {}, { panelPath: '/_panel' });
+  assert.equal((await install('https://github.com.invalid/example/cms')).status, 400);
+  assert.equal((await getSettings(kv)).installedAt, null);
+  assert.equal((await install('https://github.com/example/my-cms.git')).status, 303);
+  assert.equal((await getSettings(kv)).cmsRepository, 'https://github.com/example/my-cms');
   assert.equal((await cmsTemplateInfo(env)).present, false);
 
   const originalFetch = globalThis.fetch;
@@ -121,6 +135,7 @@ test('an empty template cache downloads the prebuilt build once and stores it in
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     if (url.hostname.includes('github')) {
+      assert.equal(url.href, 'https://raw.githubusercontent.com/example/my-cms/main/templates/cms-template-worker.js');
       templateDownloads++;
       return new Response('export default { async fetch() { return new Response("cms"); } };', { status: 200 });
     }

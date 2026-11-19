@@ -15,6 +15,7 @@ import { audit } from '../lib/audit.ts';
 import { errText } from '../lib/runtime.ts';
 import { serveBundlePath } from './public.ts';
 import { cmsTemplateInfo, deleteCmsInstance, getCmsInstance, provisionCms } from '../lib/cms-provision.ts';
+import { getSettings } from '../lib/kv.ts';
 import { getCfStatus } from '../lib/cf.ts';
 
 function flash(c: Ctx): Ctx {
@@ -93,7 +94,7 @@ export const newForm: Handler = async (c) => {
   flash(c);
   const cf = await getCfStatus(c.env);
   const template = await cmsTemplateInfo(c.env);
-  const deployReady = cf.configured && template.present;
+  const deployReady = cf.configured && (template.present || !!template.fallbackUrl);
   const body = h`
     ${pageHeader('New site', 'One hostname, one admin path, one set of credentials',
       h`<a class="btn ghost" href="${P(c, '/sites')}">Cancel</a>`)}
@@ -136,8 +137,8 @@ export const newForm: Handler = async (c) => {
                 <a class="btn sm" href="${P(c, '/cloudflare')}" style="margin-bottom:12px">${raw(icons.shieldcheck)} Finish setup in System → Cloudflare</a>
               </div>`}
           <p class="muted" style="font-size:.84rem">CMS sites reuse the cached build from the AMS CMS repository. Each site receives its own Worker, D1 database and KV namespace; its admin URL is <span class="mono">/admin-panel</span>.</p>
-          <input type="hidden" name="repo" value="https://github.com/rizwanahmedsora9-pixel/ams-builds.online">
-          <p class="hint">The master template is built and cached once. New websites do not download the repository again. Configure Cloudflare provisioning and upload the master template once before creating CMS sites.</p>
+
+          <p class="hint">The master template is built and cached once. New websites do not download the repository again. Connect Cloudflare; the panel downloads the configured module on first use, or you can upload it.</p>
         </div>
 
         <div class="card">
@@ -185,7 +186,7 @@ export const create: Handler = async (c) => {
       kind,
       primaryHost: String(f.get('host') ?? ''),
       adminSlug: kind === 'cms' ? 'admin-panel' : undefined,
-      repo: kind === 'cms' ? 'https://github.com/rizwanahmedsora9-pixel/ams-builds.online' : '',
+      repo: kind === 'cms' ? (await getSettings(c.env.KV)).cmsRepository : '',
       notes: String(f.get('notes') ?? '').trim(),
       ownerId: c.user!.id,
     });
@@ -493,7 +494,7 @@ export const edit: Handler = async (c) => {
   if (site.kind !== 'cms' && slug && /^[a-z0-9][a-z0-9-]{2,40}$/.test(slug)) patch.admin_slug = slug;
   if (site.kind !== 'cms') patch.node_url = String(f.get('node_url') ?? '').trim();
   patch.health_url = String(f.get('health_url') ?? '').trim();
-  patch.repo = site.kind === 'cms' ? 'https://github.com/rizwanahmedsora9-pixel/ams-builds.online' : String(f.get('repo') ?? '').trim();
+  if (site.kind !== 'cms') patch.repo = String(f.get('repo') ?? '').trim();
   patch.notes = String(f.get('notes') ?? '').trim();
   await updateSite(c.env.DB, site.id, patch);
   await audit(c, 'site.update', 'site', site.id, patch);

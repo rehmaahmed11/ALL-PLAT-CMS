@@ -11,13 +11,17 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 
+import { cmsRepository } from '../src/lib/cms-repository.js';
+
+const repo = cmsRepository(process.argv[2] || process.env.CMS_REPOSITORY);
+if (!repo) throw new Error('Pass a public GitHub CMS repository: npm run cms:template:build -- https://github.com/owner/repo');
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const tmp = mkdtempSync(join(tmpdir(), 'ams-cms-template-'));
 const archive = join(tmp, 'repo.tar.gz');
 const project = join(tmp, 'repo');
 const outDir = join(root, 'dist');
 const outFile = join(outDir, 'cms-template-worker.js');
-const sourceUrl = 'https://codeload.github.com/rizwanahmedsora9-pixel/ams-builds.online/tar.gz/refs/heads/main';
+const sourceUrl = `${repo.replace('https://github.com/', 'https://codeload.github.com/')}/tar.gz/refs/heads/main`;
 
 try {
   mkdirSync(project, { recursive: true });

@@ -6,6 +6,7 @@ import { saveSettings, getSettings } from '../lib/kv.ts';
 import { isSecureRequest, clientIp } from '../lib/runtime.ts';
 import { fullPage } from '../ui/layout.ts';
 import { iconMark } from '../ui/mark.ts';
+import { cmsRepository } from '../lib/cms-repository.js';
 import { validateEmail } from './validation.ts';
 
 const INSTALL_CSS = `
@@ -30,7 +31,7 @@ export async function installWizard(
   const url = new URL(request.url);
   const secure = request.headers.get('x-forwarded-proto') === 'https' || url.protocol === 'https:';
   const errors: string[] = [];
-  let step = 1;
+  let repositoryInput = '';
 
   if (request.method === 'POST') {
     const form = await request.formData();
@@ -43,6 +44,9 @@ export async function installWizard(
     const token = String(form.get('token') ?? '').trim();
     const theme = String(form.get('theme') ?? 'auto');
 
+    repositoryInput = String(form.get('cmsRepository') ?? '').trim();
+    const repository = cmsRepository(repositoryInput);
+    if (!repository) errors.push('Enter a public GitHub CMS repository URL such as https://github.com/owner/repo.');
     if (!validateEmail(email)) errors.push('Enter a valid email address.');
     if (!/^[a-z0-9][a-z0-9_.-]{2,31}$/.test(username)) errors.push('Username: 3-32 characters, letters/numbers/._- only.');
     if (password.length < 10) errors.push('Password must be at least 10 characters.');
@@ -59,6 +63,7 @@ export async function installWizard(
       const user = await createUser(env.DB, { email, username, name: name || username, password, role: 'owner' });
       await saveSettings(env.KV, {
         panelName: panelName || 'AMS Cloud Panel',
+        cmsRepository: repository,
         installedAt: Date.now(),
         theme: theme === 'light' || theme === 'dark' ? theme : 'auto',
       });
@@ -128,7 +133,12 @@ export async function installWizard(
         </div>
 
         <hr>
-        <h2>3 · What you get</h2>
+        <h2>3 · CMS template</h2>
+        <div class="field"><label for="cmsRepository">Which GitHub repository should new CMS sites use?</label>
+          <input type="url" id="cmsRepository" name="cmsRepository" required value="${repositoryInput}" placeholder="https://github.com/owner/repo">
+          <p class="hint">Choose a public repository you trust. On the first CMS deployment, the panel downloads templates/cms-template-worker.js from its main branch and caches it for later sites. If the repo only contains source code, build the Worker separately and upload it under System → Cloudflare.${env.CMS_TEMPLATE_URL ? ' This deployment has CMS_TEMPLATE_URL set; that override takes priority for downloads.' : ''}</p>
+        </div>
+        <h2>What you get</h2>
         <div class="list">
           ${[
             ['Multi-site hosting', 'Register unlimited CMS or static sites; each gets its own admin slug, credentials, env vars, and deployment history.'],

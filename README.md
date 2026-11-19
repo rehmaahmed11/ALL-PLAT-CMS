@@ -59,21 +59,14 @@ Storage is `node:sqlite` (a D1 look-alike in `local/d1.mjs`) and a folder for KV
 npm install
 npx wrangler login
 npx wrangler secret put PANEL_SETUP_TOKEN   # optional, strongly recommended
-npx wrangler deploy
+npm run deploy
 ```
 
-Wrangler creates the D1 database and KV namespace on the first run. If they
-already exist — typically after a partially completed first deploy — every
-redeploy would fail with `a namespace with this account ID and title already
-exists` (code `10014`). To prevent that, `npm install` runs
-`scripts/adopt-resources.mjs` (postinstall): with whatever Cloudflare
-credentials are available it lists the account's resources and writes the
-existing KV namespace `id` and D1 `database_id` into `wrangler.toml` before
-the deploy command runs, so Wrangler skips provisioning entirely. The step
-is best-effort — without login it leaves the file alone and the install
-still succeeds. To do it by hand instead, run `npx wrangler kv namespace
-list` and `npx wrangler d1 list` and paste the IDs yourself; see
-[`docs/DEPLOY.md`](docs/DEPLOY.md) for the exact config entries. Open
+The panel D1 database and KV namespace are **both named `AMS-HOSTING-PANEL`**;
+Worker bindings remain `DB` and `KV`. Use `npm run deploy` (also as the
+Workers Builds deploy command) so the predeploy hook finds or creates both
+by exact name and pins their IDs before Wrangler runs. For existing data or
+manual bindings, see [`docs/DEPLOY.md`](docs/DEPLOY.md). Open
 `https://<your-worker>.workers.dev/_panel` and complete the installer.
 
 Tested bundle: **254 KiB uploaded, 64 KiB gzipped** — well inside the free
@@ -108,8 +101,9 @@ that per-site CMS Worker, whose admin URL is `/admin-panel`.
 
 ### Automatic per-site AMS CMS deployments
 
-The repository in the new-site form is the source for a **single master build**.
-Build and upload it once, then give the hosting-panel Worker Cloudflare API
+The first-run installer asks for the public GitHub repository to use for every CMS site.
+Use a trusted repo that publishes a bundled Worker as `templates/cms-template-worker.js`
+on `main`, or build and upload a compatible module once. Give the panel Cloudflare API
 access so each CMS site can create its own Worker and isolated data stores.
 Each new CMS site is deployed automatically; its first visit to `/install` is
 where you create that site's CMS login. Static sites can still be created by
@@ -130,9 +124,9 @@ required once the template is built:
 3. Nothing to build: the panel downloads the prebuilt CMS module from
    `templates/cms-template-worker.js` on the first deployment and caches it in
    its KV for every later site. To pin your own build instead, run
-   `npm run cms:template:build` and upload `dist/cms-template-worker.js` on that
+   `npm run cms:template:build -- https://github.com/OWNER/REPO` for an AMS-compatible source tree and upload `dist/cms-template-worker.js` on that
    page (or `CF_ACCOUNT_ID=... CF_API_TOKEN=... npm run cms:template:upload`;
-   the helper finds the KV namespace titled `hosting-panel-cms-kv`, otherwise
+   the helper finds the KV namespace titled `AMS-HOSTING-PANEL`, otherwise
    set `PANEL_KV_NAMESPACE_ID`). After a CMS upgrade, rebuild and run
    `npm run cms:template:refresh` to update the committed copy.
 4. Create a CMS site. Its Worker, D1 database, KV namespace and cron are

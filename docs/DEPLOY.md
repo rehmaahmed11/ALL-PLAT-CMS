@@ -7,29 +7,21 @@ Three paths, from quickest to most controlled.
 ```bash
 npm install
 npx wrangler login
-npx wrangler deploy
+npm run deploy
 ```
 
-Wrangler can provision missing resources on the first deploy. If a namespace
-with the configured title already exists (for example, after a partially
-completed first deploy or when deploying through Workers Builds), Wrangler may
-not be able to adopt it automatically. The deploy then fails with
-`a namespace with this account ID and title already exists` (code `10014`).
-This means the resource exists in Cloudflare but its ID is missing from this
-repo's config; it is not a build failure. Do not create another namespace with
-the same title.
+Use `npm run deploy` as the deploy command, including in Workers Builds.
+The predeploy hook finds or creates the panel D1 and KV resources by exact
+name (`AMS-HOSTING-PANEL`) and writes their IDs to `wrangler.toml`. If it
+cannot resolve a missing ID, deployment stops. The install hook only looks
+up existing IDs and is best-effort. Do not bypass predeploy with a bare
+`wrangler deploy` unless both IDs are already configured: Wrangler can
+otherwise derive a different KV namespace title.
 
-**This is handled automatically.** `npm install` runs
-`scripts/adopt-resources.mjs` (the `postinstall` hook): in an environment
-with Cloudflare credentials — including every Workers Builds run, which
-shares its credentials with the deploy step — it executes
-`wrangler kv namespace list` and `wrangler d1 list --json`, writes the
-matching `id` and `database_id` into `wrangler.toml`, and the deploy then
-sees fully-specified bindings and skips provisioning. The hook is
-best-effort: with no credentials (a plain local install) it changes nothing
-and exits successfully. Because it runs on every install, you can also let
-it fill in the IDs once, commit the resulting `wrangler.toml`, and builds
-become deterministic from then on (the IDs are not secrets).
+**Existing installations:** changing a name in the repo does not rename live
+resources or copy their data. Back up and migrate your panel D1 and KV data
+before switching bindings. If IDs are already pinned, verify that they point
+to the intended resources; the helper leaves explicit IDs alone.
 
 If you would rather fill the IDs in by hand — or the hook could not reach
 your account — list them with an authenticated Wrangler CLI:
@@ -39,14 +31,14 @@ npx wrangler kv namespace list
 npx wrangler d1 list
 ```
 
-Use the KV `id` for the namespace titled `hosting-panel-cms-kv`, and the D1
-`uuid` for the database named `ams_cloud_panel`. Add those values to the
+Use the KV `id` for the namespace titled `AMS-HOSTING-PANEL`, and the D1
+`uuid` for the database named `AMS-HOSTING-PANEL`. Add those values to the
 corresponding bindings in `wrangler.toml`:
 
 ```toml
 [[d1_databases]]
 binding = "DB"
-database_name = "ams_cloud_panel"
+database_name = "AMS-HOSTING-PANEL"
 database_id = "<uuid from wrangler d1 list>"
 
 [[kv_namespaces]]
@@ -54,7 +46,7 @@ binding = "KV"
 id = "<id from wrangler kv namespace list>"
 ```
 
-Save the config and rerun `npx wrangler deploy` (or trigger the Workers Build
+Save the config and rerun `npm run deploy` (or trigger the Workers Build
 again). Keep the real IDs in the deployment config; the placeholders above are
 for illustration only. Open `https://hosting-panel-cms.<subdomain>.workers.dev/_panel`
 and complete the installer after deployment succeeds.
@@ -70,7 +62,7 @@ installer requires the token.
 
 ## B. Deploy from the Cloudflare dashboard (no CLI)
 
-1. Create a D1 database named `ams_cloud_panel` and a KV namespace.
+1. Create a D1 database named `AMS-HOSTING-PANEL` and a KV namespace of the same name.
 2. Create a Worker → *Connect to Git* or paste the bundle, and add the source.
 3. Bindings: `DB` → the D1 database, `KV` → the namespace.
 4. Variables: `PANEL_SETUP_TOKEN` (secret), optionally `PANEL_PATH`,
@@ -121,31 +113,40 @@ one from a folder.
 ## Automatic CMS deployments per site
 
 The panel can deploy the AMS CMS repository as a separate Worker for each CMS
-site. It builds the repository into one reusable master module and caches it in
+site. The first-run installer asks for a public GitHub repository URL. The panel
+fetches the bundled Worker at `main/templates/cms-template-worker.js` from that
+repository on first CMS deployment (it does not compile source) and caches it in
 the panel's KV; later sites reuse that module instead of downloading GitHub
 again. Every instance receives its own D1 database and KV namespace, and the
-admin path is fixed at `/admin-panel`.
+admin path is fixed at `/admin-panel`. New site storage uses the same name for
+both resources: `<SITE-NAME>-AMS-HOSTING-PANEL`. For example, `Amazon` creates
+`AMAZON-AMS-HOSTING-PANEL` in both D1 and KV. The site name is uppercased,
+spaces and punctuation become hyphens, and the prefix is shortened if needed.
+Choose distinct names after normalization. Existing resources stay bound by ID;
+renaming a site does not rename its storage.
 
 One-time template preparation from a trusted machine:
 
 ```bash
 npm install
-npm run cms:template:build
+npm run cms:template:build -- https://github.com/OWNER/REPO
 CF_ACCOUNT_ID=<account-id> CF_API_TOKEN=<token> npm run cms:template:upload
 ```
 
 The upload helper looks for the panel KV namespace titled
-`hosting-panel-cms-kv`. If the namespace has another title, also set
+`AMS-HOSTING-PANEL`. If the namespace has another title, also set
 `PANEL_KV_NAMESPACE_ID`. The template build fetches the public AMS CMS
 repository on `main`, applies the reverse-proxy host forwarding shim, and emits
 `dist/cms-template-worker.js`; run the upload after the build. `dist/` is
 ignored and should not be committed.
 
-The panel ships a prebuilt CMS module in `templates/cms-template-worker.js`, so
-you do not have to run the build above: when the KV cache is empty the panel
-downloads that file once and stores it. Build and upload your own only if you
-want to pin a specific CMS revision, and run `npm run cms:template:refresh`
-afterwards to keep the committed copy in step with the CMS repository.
+The build helper is for compatible AMS CMS source trees; pass the same repository
+as in the installer (or set `CMS_REPOSITORY` locally). For another CMS, use its
+own build process to produce a single compatible Worker module. Upload it under
+System → Cloudflare or publish it at the path above. A cached or uploaded module
+is used first; on cache miss `CMS_TEMPLATE_URL` overrides the repository URL.
+Older panels without a saved repository can keep their cached template, upload
+a replacement, or configure `CMS_TEMPLATE_URL` for automatic downloads.
 
 Then connect the panel to Cloudflare: open **System → Cloudflare** in the panel,
 paste the 32-character account ID and an API token with Workers Scripts edit, D1
@@ -186,7 +187,7 @@ namespace.
 ```bash
 git pull
 npm install
-npx wrangler deploy
+npm run deploy
 ```
 
 Schema changes are additive and applied automatically on the first request

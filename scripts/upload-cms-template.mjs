@@ -19,10 +19,10 @@ if (!namespace) {
   const list = await fetch(listUrl, { headers: { authorization: `Bearer ${token}` } });
   const result = await list.json().catch(() => null);
   if (!list.ok || result?.success === false) throw new Error('Could not list Cloudflare KV namespaces; set PANEL_KV_NAMESPACE_ID explicitly.');
-  const found = (result?.result ?? []).find((item) => item.title === 'hosting-panel-cms-kv');
+  const found = (result?.result ?? []).find((item) => item.title === 'AMS-HOSTING-PANEL');
   namespace = found?.id ?? '';
   if (!namespace) {
-    console.error('Could not find the panel namespace hosting-panel-cms-kv. Set PANEL_KV_NAMESPACE_ID explicitly.');
+    console.error('Could not find the panel namespace AMS-HOSTING-PANEL. Set PANEL_KV_NAMESPACE_ID explicitly.');
     process.exit(1);
   }
 }
