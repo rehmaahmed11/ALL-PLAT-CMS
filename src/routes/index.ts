@@ -2,6 +2,7 @@ import { Router } from '../lib/router.ts';
 import * as auth from './auth-pages.ts';
 import * as dash from './pages.ts';
 import * as sites from './sites.ts';
+import * as attachDomain from './attach-domain.ts';
 import * as domains from './domains.ts';
 import * as monitor from './monitor.ts';
 import * as content from './content.ts';
@@ -43,6 +44,11 @@ export function buildRouter(): Router {
   r.post('/sites/:id/cms-provision', sites.provisionCmsSite);
   r.post('/sites/:id/delete', sites.remove);
   r.get('/sites/:id/preview', sites.preview);
+  // Attach Domain wizard (VPS sites only; the handlers enforce that)
+  r.get('/sites/:id/attach-domain', attachDomain.page);
+  r.post('/sites/:id/attach-domain/ip', attachDomain.saveIp);
+  r.post('/sites/:id/attach-domain/domain', attachDomain.saveDomain);
+  r.post('/sites/:id/attach-domain/check', attachDomain.recheck);
 
   // domains
   r.get('/domains', domains.list);

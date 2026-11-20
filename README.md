@@ -98,6 +98,21 @@ custom alias, register it in **Domains**, point its DNS at the same VPS, and
 include it in the reverse proxy configuration. The panel selects the site using
 the incoming hostname; it does not buy domains, change DNS, or issue certificates.
 
+#### Attach a domain from the panel (VPS sites only)
+
+On a VPS site's page, the **Attach domain** card opens a step-by-step wizard:
+it shows the server IPv4 to copy, explains the Namecheap A record
+(Type `A`, Host `@`, Value = that IP), then asks for the exact domain and
+checks DNS automatically. The domain is saved whatever happens, and the card
+keeps showing the truthful saved state — 🟢 Linked (an A record equals the
+server IP), 🟡 Waiting (no record found yet; DNS can take minutes to hours),
+🔴 Not linked (the domain resolves to a different IP or a CNAME) — with a
+**Check again** button for later. Set `VPS_PUBLIC_IP` (or `SERVER_IP`) in the
+Node runner's environment to have the wizard show the IP automatically;
+otherwise the wizard asks for it once and remembers it. The wizard never
+changes DNS or the reverse proxy: the hostname must still reach the panel
+through Caddy (or your proxy) as described above.
+
 #### Optional automatic trial URLs
 
 To let VPS sites start before a customer provides their final domain, start the

@@ -16,6 +16,8 @@ export type Env = {
   PANEL_HOST?: string;
   /** Optional base domain for automatic VPS trial hosts; DNS/TLS wildcard must be configured separately. */
   VPS_PREVIEW_DOMAIN?: string;
+  /** Optional public IPv4 of the VPS, shown in the Attach Domain wizard. */
+  VPS_PUBLIC_IP?: string;
   /** Optional: path prefix for the panel. Defaults to /_panel */
   PANEL_PATH?: string;
   /** Optional: shared secret required by the first-run setup wizard. */
@@ -93,7 +95,7 @@ export type Domain = {
   site_id: string;
   host: string;
   kind: 'primary' | 'alias';
-  status: 'pending' | 'active';
+  status: 'pending' | 'active' | 'failed';
   verify_token: string;
   created_at: number;
   last_dns_at: number | null;

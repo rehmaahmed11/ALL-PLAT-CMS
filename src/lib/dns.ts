@@ -48,6 +48,90 @@ export async function resolve(host: string, type: 'A' | 'AAAA' | 'CNAME' | 'TXT'
   }
 }
 
+export function isIpv4(v: string): boolean {
+  const parts = String(v ?? '').trim().split('.');
+  return parts.length === 4 && parts.every((p) => /^\d{1,3}$/.test(p) && Number(p) <= 255);
+}
+
+export type DomainLinkState = 'linked' | 'waiting' | 'failed';
+export type DomainLinkResult = {
+  state: DomainLinkState;
+  ok: boolean;
+  headline: string;
+  detail: string;
+  records: string[];
+  foundIps: string[];
+};
+
+/**
+ * Pure judgement for the Attach Domain wizard: does this host's DNS point at
+ * this server's IPv4? Kept separate from the network lookup so it can be
+ * unit-tested and so the answer shown to the user is always truthful:
+ *  - linked  (green)  an A record equals the server IP
+ *  - waiting (yellow) no DNS record found yet — DNS changes take time
+ *  - failed  (red)    the domain resolves, but to somewhere else
+ */
+export function judgeDomainLink(
+  host: string,
+  expectedIp: string,
+  found: { a: string[]; aaaa: string[]; cname: string[] },
+): DomainLinkResult {
+  const records = [
+    ...found.cname.map((v) => `CNAME ${v}`),
+    ...found.a.map((v) => `A ${v}`),
+    ...found.aaaa.map((v) => `AAAA ${v}`),
+  ];
+  const foundIps = [...found.a];
+  if (expectedIp && found.a.includes(expectedIp)) {
+    return {
+      state: 'linked', ok: true,
+      headline: 'Linked',
+      detail: `${host} points to this server (${expectedIp}). DNS is correct.`,
+      records, foundIps,
+    };
+  }
+  if (!found.a.length && !found.aaaa.length && !found.cname.length) {
+    return {
+      state: 'waiting', ok: false,
+      headline: 'Not linked yet',
+      detail: `No DNS record found for ${host} yet. DNS can take 5 minutes to a few hours. Your domain is saved — come back later and press "Check again".`,
+      records, foundIps,
+    };
+  }
+  if (found.cname.length && !found.a.length) {
+    return {
+      state: 'failed', ok: false,
+      headline: 'Not linked',
+      detail: `${host} uses a CNAME record (${found.cname.join(', ')}). In Namecheap, delete that CNAME and add an A record with the value ${expectedIp || 'of this server'}, then press "Check again".`,
+      records, foundIps,
+    };
+  }
+  const seen = [...found.a, ...found.aaaa].join(', ') || 'nothing';
+  return {
+    state: 'failed', ok: false,
+    headline: 'Not linked',
+    detail: `${host} points to ${seen}, but this server is ${expectedIp || 'unknown'}. In Namecheap, change the A record value to ${expectedIp || 'this server IP'}, then press "Check again".`,
+    records, foundIps,
+  };
+}
+
+/** Live check used by the Attach Domain wizard (A record vs the server IPv4). */
+export async function checkDomainLink(host: string, expectedIp: string): Promise<DomainLinkResult> {
+  const [a, aaaa, cname] = await Promise.all([resolve(host, 'A'), resolve(host, 'AAAA'), resolve(host, 'CNAME')]);
+  return judgeDomainLink(host, expectedIp, {
+    a: a.answers.map((x) => x.data.replace(/\.$/, '')),
+    aaaa: aaaa.answers.map((x) => x.data.replace(/\.$/, '')),
+    cname: cname.answers.map((x) => x.data.replace(/\.$/, '')),
+  });
+}
+
+/** Colour state for a saved domain row, shared by the wizard and the settings card. */
+export function domainLinkState(row: { status?: string; last_dns_ok?: number | null; last_dns_at?: number | null }): DomainLinkState {
+  if (Number(row.last_dns_ok) === 1) return 'linked';
+  if (row.status === 'failed') return 'failed';
+  return 'waiting';
+}
+
 export type DnsVerdict = {
   ok: boolean;
   level: 'ok' | 'warn' | 'err';
