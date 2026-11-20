@@ -10,6 +10,7 @@
  * depends on Cloudflare.
  */
 
+import { networkInterfaces } from 'node:os';
 import { createServer } from 'node:http';
 import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, extname, join } from 'node:path';
@@ -23,7 +24,18 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const dataDir = process.env.PANEL_DATA_DIR || join(root, 'local', 'data');
 await mkdir(dataDir, { recursive: true });
 
+// Use only an unambiguous public address on this host, never a client or proxy IP.
+const publicAddresses = new Set(Object.values(networkInterfaces()).flat().filter(n => {
+  if (!n || n.internal || n.family !== 'IPv4') return false;
+  const [a, b, c] = n.address.split('.').map(Number);
+  return a > 0 && a < 224 && ![10, 127].includes(a) && !(a === 100 && b >= 64 && b <= 127)
+    && !(a === 169 && b === 254) && !(a === 172 && b >= 16 && b <= 31)
+    && !(a === 192 && (b === 168 || (b === 0 && [0, 2].includes(c)) || (b === 88 && c === 99)))
+    && !(a === 198 && ([18, 19].includes(b) || (b === 51 && c === 100))) && !(a === 203 && b === 0 && c === 113);
+}).map(n => n.address));
+
 const env = {
+  VPS_INTERFACE_IP: publicAddresses.size === 1 ? [...publicAddresses][0] : '',
   VPS_CMS: vpsCms(join(dataDir, 'sites')),
   CF_API_TOKEN: process.env.CF_API_TOKEN,
   CF_ACCOUNT_ID: process.env.CF_ACCOUNT_ID,

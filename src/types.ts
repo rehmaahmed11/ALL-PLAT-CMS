@@ -18,6 +18,7 @@ export type Env = {
   VPS_PREVIEW_DOMAIN?: string;
   /** Optional public IPv4 of the VPS, shown in the Attach Domain wizard. */
   VPS_PUBLIC_IP?: string;
+  VPS_INTERFACE_IP?: string;
   /** Optional: path prefix for the panel. Defaults to /_panel */
   PANEL_PATH?: string;
   /** Optional: shared secret required by the first-run setup wizard. */

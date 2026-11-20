@@ -31,12 +31,14 @@ function flash(c: Ctx): Ctx {
 const isVpsSite = (site: any): boolean => site?.kind === 'cms' && site?.hosting === 'vps';
 
 /** The IPv4 we expect DNS to point at: env var wins, then the saved setting. */
-export async function serverIp(c: Ctx): Promise<{ ip: string; source: 'env' | 'saved' | '' }> {
+export async function serverIp(c: Ctx): Promise<{ ip: string; source: 'env' | 'saved' | 'interface' | '' }> {
   const fromEnv = String(c.env.VPS_PUBLIC_IP ?? '').trim();
   if (isIpv4(fromEnv)) return { ip: fromEnv, source: 'env' };
   const settings = await getSettings(c.env.KV);
   const saved = String(settings.vpsPublicIp ?? '').trim();
   if (isIpv4(saved)) return { ip: saved, source: 'saved' };
+  const detected = c.env.VPS_INTERFACE_IP || '';
+  if (isIpv4(detected)) return { ip: detected, source: 'interface' };
   return { ip: '', source: '' };
 }
 
@@ -140,7 +142,7 @@ export const page: Handler = async (c) => {
       </div>
       <dl class="kv">
         <dt>Domain</dt><dd class="mono">${row.host}</dd>
-        <dt>Server IP</dt><dd class="mono">${ip || 'not set'}</dd>
+        <dt>Server IP</dt><dd class="mono">${ip ? copyBox(ip) : 'not set'}</dd>
         <dt>Last check</dt><dd>${row.last_dns_at ? timeAgo(row.last_dns_at) : 'never'}</dd>
       </dl>
       <p class="muted" style="font-size:.86rem">Your domain is <b>saved</b>. If the colour is yellow or red, fix DNS in Namecheap (Step 1), wait some time, then press Check again. You can also close this page — Site Settings will show the same colour.</p>
@@ -149,12 +151,13 @@ export const page: Handler = async (c) => {
           <input type="hidden" name="domain_id" value="${row.id}">
           <button class="btn primary">${raw(icons.refresh)} Check again</button></form>
         ${state === 'linked' ? h`<a class="btn" href="https://${row.host}" target="_blank" rel="noopener">${raw(icons.external)} Open my site</a>` : ''}
-        <a class="btn ghost" href="${P(c, `/sites/${site.id}/attach-domain?step=2`)}">Change domain</a>
+        <a class="btn ghost" href="${P(c, `/sites/${site.id}/attach-domain?step=1`)}">Edit domain and DNS instructions</a>
         <a class="btn ghost" href="${P(c, `/sites/${site.id}`)}">Back to site settings</a>
       </div>`;
     return pageShell(c, site, 3, inner);
   }
 
+  if (step === 2 && !ip) return redirect(P(c, `/sites/${site.id}/attach-domain?step=1`));
   if (step === 2) {
     const row = await attachRowFor(c, site);
     const inner = h`
@@ -183,6 +186,7 @@ export const page: Handler = async (c) => {
   }
 
   // Step 1
+  const existing = await attachRowFor(c, site);
   const inner = h`
     <h2>Step 1 · Copy this server IP</h2>
     <p>This is the IP address of <b>your VPS server</b>. Your domain must point here.</p>
@@ -215,7 +219,7 @@ export const page: Handler = async (c) => {
       </tr></tbody>
     </table></div>
     <p class="hint"><span class="mono">@</span> means your main domain (like <span class="mono">my-shop.com</span>). For a subdomain like <span class="mono">shop.my-shop.com</span>, write <span class="mono">shop</span> in Host. If an old A record or CNAME with the same Host exists, delete it first.</p>
-    ${source === 'saved'
+    ${source === 'saved' || source === 'interface'
       ? h`<form method="post" action="${P(c, `/sites/${site.id}/attach-domain/ip`)}" class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap;margin-top:14px">
             ${csrfInput(c)}
             <div class="field" style="margin:0;flex:1;min-width:220px"><label>Wrong IP? Change it</label>
@@ -224,6 +228,8 @@ export const page: Handler = async (c) => {
           </form>`
       : ''}
     <div class="actions" style="margin-top:20px">
+      ${existing && ip ? h`<form method="post" action="${P(c, `/sites/${site.id}/attach-domain/check`)}">${csrfInput(c)}
+        <input type="hidden" name="domain_id" value="${existing.id}"><button class="btn">Check again: ${existing.host}</button></form>` : ''}
       ${ip
         ? h`<a class="btn primary" href="${P(c, `/sites/${site.id}/attach-domain?step=2`)}">I added the record in Namecheap — Next →</a>`
         : h`<button class="btn primary" disabled>Save the server IP first</button>`}
@@ -260,6 +266,7 @@ export const saveDomain: Handler = async (c) => {
   const site = await loadVpsSite(c);
   if (site instanceof Response) return site;
 
+  if (!(await serverIp(c)).ip) return flashRedirect(c, P(c, `/sites/${site.id}/attach-domain?step=1`), 'err', 'Set the VPS IP before checking the domain.');
   const back = P(c, `/sites/${site.id}/attach-domain?step=2`);
   const host = cleanHost(String(c.form?.get('host') ?? ''));
   if (!validHost(host) || host.endsWith('.localhost')) {
