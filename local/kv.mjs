@@ -74,7 +74,6 @@ export class LocalKV {
   async getWithMetadata(key, type) {
     const meta = await this._readMeta(key);
     const value = await this.get(key, type);
-    if (value === null) return null;
     return { value, metadata: meta?.metadata ?? {}, cacheStatus: null };
   }
 

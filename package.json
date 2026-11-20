@@ -17,6 +17,7 @@
     "cms:template:refresh": "node scripts/refresh-cms-template.mjs",
     "tail": "wrangler tail",
     "typecheck": "tsc --noEmit",
+    "test:vps": "node --test tests/vps-http.test.mjs",
     "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {

@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS sites (
   name           TEXT NOT NULL,
   slug           TEXT NOT NULL UNIQUE,
   kind           TEXT NOT NULL DEFAULT 'cms',
+  hosting        TEXT NOT NULL DEFAULT 'cloudflare',
   status         TEXT NOT NULL DEFAULT 'live',
   primary_host   TEXT NOT NULL DEFAULT '',
   admin_slug     TEXT NOT NULL DEFAULT '',

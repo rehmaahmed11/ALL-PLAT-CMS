@@ -291,7 +291,7 @@ export async function pendingCmsInstances(db: any, limit = 25): Promise<PendingC
             COALESCE(ci.error,'') AS error,
             COALESCE(ci.updated_at, s.created_at) AS updated_at
        FROM sites s LEFT JOIN cms_instances ci ON ci.site_id = s.id
-      WHERE s.kind='cms' AND (ci.site_id IS NULL OR ci.status <> 'active')
+      WHERE s.kind='cms' AND s.hosting='cloudflare' AND (ci.site_id IS NULL OR ci.status <> 'active')
       ORDER BY updated_at DESC LIMIT ?`,
     [limit],
   );
@@ -357,6 +357,7 @@ async function assignCloudflareDomain(
 }
 
 export async function provisionCms(env: Env, site: Site): Promise<CmsInstance> {
+  if (site.hosting === 'vps') throw new CmsProvisionError('This site is hosted on the VPS.');
   const auth = await credentials(env);
   const { script, repository } = await loadCmsTemplate(env);
 

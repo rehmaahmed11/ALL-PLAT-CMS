@@ -164,15 +164,16 @@ export const onboarding: Handler = async (c) => {
     <div class="grid g2">
       <div class="card">
         <h2>1 · Add a site</h2>
-        <p class="muted">Every site gets its own admin path, credentials, environment variables and deployment history. Attach Cloudflare keys first and a <span class="mono">workers.dev</span> domain is assigned automatically.</p>
+        <p class="muted">Every site gets its own admin path, credentials, environment variables and deployment history. For Cloudflare hosting, attach keys first and a <span class="mono">workers.dev</span> domain is assigned automatically.</p>
         <p class="mono" style="font-size:.82rem;background:var(--bg2);padding:10px;border-radius:9px">https://your-domain.com<b>/${'<admin-slug>'}</b></p>
         <div class="actions"><a class="btn primary" href="${P(c, '/sites/new')}">Create a site</a>
         <a class="btn ghost" href="${P(c, '/cloudflare/keys')}">${raw(icons.key)} Attach Cloudflare API keys</a></div>
       </div>
       <div class="card">
-        <h2>2 · Point DNS at this Worker</h2>
+        <h2>2 · Connect the domain</h2>
         <p class="muted">The panel serves the site on whatever hostname reaches it. Two ways to connect a domain:</p>
         <div class="col" style="gap:8px;font-size:.87rem">
+          ${c.env.VPS_CMS ? h`<div class="note"><b>VPS:</b> Point the hostname at your VPS IP and forward HTTPS traffic to the panel.</div>` : ''}
           <div class="note"><b>Cloudflare dashboard:</b> add the zone, then a route or custom domain for this Worker.</div>
           <div class="note warn"><b>Elsewhere:</b> CNAME the host to <span class="mono">${esc(host)}</span>.</div>
         </div>

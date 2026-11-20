@@ -141,7 +141,7 @@ export async function installWizard(
             ['Uptime monitoring', 'Health checks every 10 minutes plus on-demand, with latency sparklines and 24h uptime.'],
             ['DNS verification', 'Live DNS-over-HTTPS checks and per-domain TXT ownership verification.'],
             ['Audit trail', 'Every change is attributed to a user, with IP and timestamp.'],
-            ['Cloudflare API keys', 'Attach keys once from the sidebar; every CMS site gets an assigned workers.dev domain automatically.'],
+            ['Cloudflare API keys', 'Attach keys once from the sidebar; each CMS site you place on Cloudflare gets an assigned workers.dev domain automatically.'],
           ].map(
             ([title, text]) => h`<div class="item">
               <span class="feat">${raw(icons('check'))}</span>

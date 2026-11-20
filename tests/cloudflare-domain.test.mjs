@@ -214,3 +214,50 @@ test('the site overview explicitly reports the assigned Cloudflare domain and re
   assert.ok(!html.includes('https://your-host/admin-panel'));
   assert.match(html, /href="\/_panel\/cloudflare\/keys"/);
 });
+
+test('New Site keeps VPS and Cloudflare targets independent in one dashboard', async t => {
+  const { vpsCms } = await import('../local/vps-cms.mjs');
+  const { mkdtemp, rm, stat } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { pendingCmsInstances } = await import('../src/lib/cms-provision.ts');
+  const root = await mkdtemp(join(tmpdir(), 'panel-sites-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const db = await freshDb();
+  const env = await signedInPanel(db);
+  const post = (path, fields) => worker.fetch(withSession(path, { method: 'POST', body: new URLSearchParams({ csrf: 'csrf-token', ...fields }) }), env, ctx());
+  const create = (target, name, host) => post('/_panel/sites/new', { target, name, host });
+  const visit = (host, path, opts) => worker.fetch(new Request(`https://${host}${path}`, opts), env, ctx());
+  await create('vps', 'Unavailable', 'no.example.com');
+  env.VPS_CMS = vpsCms(root);
+  await create('', 'No Choice', 'no.example.com');
+  await create('vps', 'No Host', '');
+  assert.equal((await all(db, 'SELECT * FROM sites')).length, 0);
+  await create('vps', 'Shop', 'shop.example.com');
+  await create('vps', 'Blog', 'blog.example.com');
+  const shop = await one(db, "SELECT * FROM sites WHERE name='Shop'");
+  assert.equal(shop.hosting, 'vps');
+  assert.ok((await stat(join(root, shop.id, 'cms.sqlite'))).isFile());
+  const installed = await visit('shop.example.com', '/install', { method: 'POST', headers: { origin: 'https://shop.example.com' }, body: new URLSearchParams({
+    username: 'admin', password: 'safe-password', password2: 'safe-password', email: 'admin@example.com', title: 'Shop', domain: 'shop.example.com', slug: 'admin-panel',
+  }) });
+  assert.match(await installed.text(), /All set/);
+  assert.match(await (await visit('shop.example.com', '/')).text(), /Welcome to Shop/);
+  assert.equal((await visit('blog.example.com', '/?site=shop')).headers.get('location'), '/install');
+  await create('cloudflare', 'Cloud Demo', '');
+  const pending = await pendingCmsInstances(db);
+  assert.deepEqual(pending.map(row => row.site_name), ['Cloud Demo']);
+  Object.assign(env, provisionEnv(db));
+  const restore = mockCloudflareApi();
+  try {
+    await create('cloudflare', 'Cloud Live', '');
+    const live = await one(db, "SELECT * FROM sites WHERE name='Cloud Live'");
+    assert.equal(live.hosting, 'cloudflare');
+    assert.match(live.node_url, /\.workers\.dev$/);
+    const page = await worker.fetch(withSession('/_panel/sites'), env, ctx());
+    assert.match(await page.text(), /CMS · VPS/);
+    await post(`/_panel/sites/${shop.id}/delete`, {});
+    await assert.rejects(stat(join(root, shop.id)), { code: 'ENOENT' });
+    assert.equal((await visit('blog.example.com', '/')).headers.get('location'), '/install');
+  } finally { restore(); }
+});

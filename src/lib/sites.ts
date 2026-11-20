@@ -52,6 +52,7 @@ export type CreateSiteInput = {
   name: string;
   slug?: string;
   kind: SiteKind;
+  hosting?: Site['hosting'];
   primaryHost: string;
   adminSlug?: string;
   ownerId?: string | null;
@@ -90,6 +91,7 @@ export async function createSite(db: any, input: CreateSiteInput): Promise<Site>
     name,
     slug,
     kind: input.kind,
+    hosting: input.hosting ?? 'cloudflare',
     status: 'live',
     primary_host: host,
     admin_slug: input.adminSlug || (input.kind === 'cms' ? 'admin-panel' : `admin-${slugToken(6)}`),
@@ -110,9 +112,9 @@ export async function createSite(db: any, input: CreateSiteInput): Promise<Site>
   };
   await run(
     db,
-    `INSERT INTO sites (id,name,slug,kind,status,primary_host,admin_slug,owner_id,node_url,health_url,repo,branch,notes,theme,db_password,created_at,updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [site.id, site.name, site.slug, site.kind, site.status, site.primary_host, site.admin_slug, site.owner_id, site.node_url,
+    `INSERT INTO sites (id,name,slug,kind,hosting,status,primary_host,admin_slug,owner_id,node_url,health_url,repo,branch,notes,theme,db_password,created_at,updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [site.id, site.name, site.slug, site.kind, site.hosting, site.status, site.primary_host, site.admin_slug, site.owner_id, site.node_url,
       site.health_url, site.repo, site.branch, site.notes, site.theme, site.db_password, site.created_at, site.updated_at],
   );
 

@@ -14,8 +14,7 @@ import { generatePassword, slugToken } from '../lib/crypto.ts';
 import { audit } from '../lib/audit.ts';
 import { errText } from '../lib/runtime.ts';
 import { serveBundlePath } from './public.ts';
-import { cloudflareWorkerHost, cmsTemplateInfo, deleteCmsInstance, getCmsInstance, provisionCms } from '../lib/cms-provision.ts';
-import { BUNDLED_CMS_REPOSITORY } from '../lib/cms-repository.js';
+import { cloudflareWorkerHost, deleteCmsInstance, getCmsInstance, provisionCms } from '../lib/cms-provision.ts';
 import { getCfStatus } from '../lib/cf.ts';
 
 function flash(c: Ctx): Ctx {
@@ -70,7 +69,7 @@ export const list: Handler = async (c) => {
               (s) => h`<tr>
                 <td>
                   <a href="${P(c, `/sites/${s.id}`)}"><b>${s.name}</b></a>
-                  <div class="muted" style="font-size:.74rem"><span class="mono">/${s.slug}</span> · ${s.kind}</div>
+                  <div class="muted" style="font-size:.74rem"><span class="mono">/${s.slug}</span> · ${s.kind === 'cms' ? (s.hosting === 'vps' ? 'CMS · VPS' : 'CMS · Cloudflare') : 'Static / proxy'}</div>
                 </td>
                 <td>${statusBadge(s.status)}</td>
                 <td class="mono" style="font-size:.82rem">${s.primary_host || h`<span class="muted">unassigned</span>`}</td>
@@ -93,9 +92,6 @@ export const newForm: Handler = async (c) => {
   if (gate) return gate;
   flash(c);
   const cf = await getCfStatus(c.env);
-  const template = await cmsTemplateInfo(c.env);
-  const templateReady = template.present || template.bundled || template.fallbackUrls.length > 0;
-  const deployReady = cf.configured && templateReady;
   const body = h`
     ${pageHeader('New site', 'One hostname, one admin path, one set of credentials',
       h`<a class="btn ghost" href="${P(c, '/sites')}">Cancel</a>`)}
@@ -108,40 +104,25 @@ export const newForm: Handler = async (c) => {
             <div class="field"><label>Site name</label>
               <input type="text" name="name" required minlength="2" placeholder="My Blog" value="${q(c, 'name')}">
               <p class="hint">Only used inside the panel.</p></div>
-            <div class="field"><label>Kind</label>
-              <select name="kind">
-                <option value="cms">AMS CMS (isolated Worker)</option>
+            <div class="field"><label for="target">Where should this site run?</label>
+              <select id="target" name="target" required>
+                <option value="" selected disabled>Choose for this site</option>
+                <option value="vps" ${!c.env.VPS_CMS ? 'disabled' : ''}>My VPS — AMS CMS${!c.env.VPS_CMS ? ' (requires VPS runner)' : ''}</option>
+                <option value="cloudflare">My Cloudflare account — AMS CMS</option>
                 <option value="node">Static bundle / external proxy</option>
-              </select>
-              <p class="hint">CMS sites are deployed from the cached template with separate D1 and KV storage.</p></div>
+              </select></div>
           </div>
           <div class="field"><label>Primary hostname</label>
             <input type="text" name="host" placeholder="blog.example.com" autocapitalize="none" value="${q(c, 'host')}">
-            <p class="hint">No <span class="mono">https://</span>. Leave blank to add the domain later. Aliases are managed on the Domains page.</p></div>
+            <p class="hint">No <span class="mono">https://</span>. Required for VPS sites. For Cloudflare, leave blank to use its assigned address. Aliases are managed on the Domains page.</p></div>
         </div>
 
         <div class="card">
-          <h2>Automatic CMS deployment</h2>
-          ${deployReady
-            ? h`<div class="note" style="margin-bottom:12px;border-color:rgba(52,211,153,.35)">
-                <div class="row" style="gap:8px;align-items:flex-start"><span style="color:var(--ok)">${raw(icons.check)}</span>
-                  <div><b style="font-size:.88rem">Cloudflare is connected</b>
-                    <div class="muted" style="font-size:.82rem">A Cloudflare workers.dev domain is assigned as this site's primary host as soon as you press Create site. Its Worker, D1 database and KV namespace are created at the same time.</div></div></div>
-              </div>`
-            : h`<div class="note warn" style="margin-bottom:12px">
-                <div class="row" style="gap:8px;align-items:flex-start"><span style="color:var(--warn)">${raw(icons.warning)}</span>
-                  <div><b style="font-size:.88rem">Cloudflare domain not ready yet</b>
-                    <div class="muted" style="font-size:.82rem">${!cf.configured
-                      ? 'Cloudflare API keys are not attached yet, so no workers.dev domain can be assigned on creation.'
-                      : 'The bundled CMS template is not available in this deployment.'}
-                      The site will still be created with a pending Cloudflare domain — no data is lost.</div></div></div>
-                <a class="btn sm" href="${P(c, !cf.configured ? '/cloudflare/keys' : '/cloudflare')}" style="margin-bottom:12px">${raw(icons.shieldcheck)} ${!cf.configured ? 'Attach Cloudflare API keys' : 'Finish template setup'}</a>
-              </div>`}
-          <p class="muted" style="font-size:.84rem">By default, CMS sites use the bundled build from <a href="${BUNDLED_CMS_REPOSITORY}" target="_blank" rel="noopener">${BUNDLED_CMS_REPOSITORY}</a>. Each site gets its own Worker, D1 database and KV namespace; its admin URL is <span class="mono">/admin-panel</span>.</p>
-
-          <p class="hint">The build is cached and is not rebuilt from GitHub for each site. A manually uploaded template or CMS_TEMPLATE_URL can override the bundled build; see <a href="${P(c, '/cloudflare')}">Cloudflare deployments</a> for the active template.</p>
+          <h2>Hosting options</h2>
+          <p><b>My VPS:</b> Use a hostname you own. Point its DNS at the VPS and forward HTTPS to this panel. Each site has its own SQLite database and files.</p>
+          <p><b>Cloudflare:</b> Create a Worker, D1 database, KV namespace and workers.dev address in your connected account.</p>
+          <p>${cf.configured ? 'Cloudflare account connected.' : h`For Cloudflare hosting, <a href="${P(c, '/cloudflare/keys')}">connect your account</a>. VPS hosting needs no Cloudflare keys.`}</p>
         </div>
-
         <div class="card">
           <h2>Notes</h2>
           <textarea name="notes" placeholder="Anything future-you needs to know about this site."></textarea>
@@ -149,25 +130,6 @@ export const newForm: Handler = async (c) => {
       </div>
 
       <div class="stack">
-        <div class="card">
-          <h3>What gets created</h3>
-          <div class="col" style="gap:9px;font-size:.86rem">
-            <div class="row" style="gap:8px"><span style="color:var(--ok)">${raw(icons.check)}</span>Admin URL <span class="mono">/admin-panel</span></div>
-            <div class="row" style="gap:8px"><span style="color:var(--ok)">${raw(icons.check)}</span>A dedicated CMS Worker, D1 database and KV namespace</div>
-            <div class="row" style="gap:8px"><span style="color:var(--ok)">${raw(icons.check)}</span>An assigned Cloudflare <span class="mono">workers.dev</span> primary domain</div>
-            <div class="row" style="gap:8px"><span style="color:var(--ok)">${raw(icons.check)}</span>Audit entries for every later change</div>
-          </div>
-        </div>
-        <div class="card">
-          <h3>Before first CMS deployment</h3>
-          <div class="col" style="gap:8px;font-size:.84rem">
-            <div class="row" style="gap:8px"><span style="color:${cf.configured ? 'var(--ok)' : 'var(--warn)'}">${raw(cf.configured ? icons.check : icons.warning)}</span>
-              Cloudflare API access</div>
-            <div class="row" style="gap:8px"><span style="color:${templateReady ? 'var(--ok)' : 'var(--warn)'}">${raw(templateReady ? icons.check : icons.warning)}</span>
-              CMS template available</div>
-          </div>
-          <p class="hint" style="margin-top:10px">Attach keys once at <a href="${P(c, '/cloudflare/keys')}">Cloudflare API keys</a>. The bundled CMS Worker is already included; template uploads are under <a href="${P(c, '/cloudflare')}">Cloudflare deployments</a>. Each site then gets an assigned Cloudflare domain and a fresh CMS install wizard.</p>
-        </div>
         <button class="btn primary" style="width:100%;padding:11px">Create site</button>
       </div>
     </form>`;
@@ -181,15 +143,34 @@ export const create: Handler = async (c) => {
   if (csrf) return csrf;
   const f = c.form!;
   try {
-    const kind = String(f.get('kind') ?? 'cms') === 'node' ? 'node' : 'cms';
+    const target = String(f.get('target') ?? '');
+    if (!['vps', 'cloudflare', 'node'].includes(target)) throw new ValidationError('Choose where this site should run.');
+    const kind = target === 'node' ? 'node' : 'cms';
+    if (target === 'vps') {
+      if (!c.env.VPS_CMS) throw new ValidationError('VPS hosting requires the VPS runner.');
+      const host = cleanHost(String(f.get('host') ?? ''));
+      if (!host || host === cleanHost(c.env.PANEL_HOST || c.host)) throw new ValidationError('Enter a site hostname different from the panel hostname.');
+    }
     const site = await createSite(c.env.DB, {
       name: String(f.get('name') ?? ''),
       kind,
+      hosting: target === 'vps' ? 'vps' : 'cloudflare',
       primaryHost: String(f.get('host') ?? ''),
       adminSlug: kind === 'cms' ? 'admin-panel' : undefined,
       notes: String(f.get('notes') ?? '').trim(),
       ownerId: c.user!.id,
     });
+    if (target === 'vps') {
+      try {
+        await c.env.VPS_CMS!.provision(site.id);
+      } catch (err) {
+        await c.env.VPS_CMS!.remove(site.id);
+        await deleteSite(c.env.DB, site.id);
+        throw err;
+      }
+      await audit(c, 'site.create', 'site', site.id, { hosting: target, host: site.primary_host });
+      return flashRedirect(c, P(c, `/sites/${site.id}`), 'ok', `Site created on your VPS. Open https://${site.primary_host}/install after connecting the domain.`);
+    }
     await audit(c, 'site.create', 'site', site.id, { name: site.name, host: site.primary_host });
     if (kind === 'cms') {
       const cf = await getCfStatus(c.env);
@@ -245,8 +226,10 @@ export const detail: Handler = async (c) => {
   ]);
   const uptime = await uptimeFor(c.env.DB, site.id, 40);
   const active = deps.find((d) => d.status === 'active');
-  const cmsInstance = site.kind === 'cms' ? await getCmsInstance(c.env.DB, site.id) : null;
-  const cf = site.kind === 'cms' ? await getCfStatus(c.env) : null;
+  const onVps = site.kind === 'cms' && site.hosting === 'vps';
+  const cloudCms = site.kind === 'cms' && !onVps;
+  const cmsInstance = cloudCms ? await getCmsInstance(c.env.DB, site.id) : null;
+  const cf = cloudCms ? await getCfStatus(c.env) : null;
   const tab = q(c, 'tab', 'overview');
 
   const tabs = [
@@ -265,7 +248,7 @@ export const detail: Handler = async (c) => {
   const publicHost = site.primary_host || cmsHost;
   const adminUrl = publicHost ? `https://${publicHost}/${site.admin_slug}` : `/${site.admin_slug}`;
   const healthDisplay = site.health_url || (publicHost ? `https://${publicHost}/api/health` : '—');
-  const originDisplay = origin || (site.kind === 'cms' ? 'pending Cloudflare Worker' : 'served from KV bundle');
+  const originDisplay = onVps ? 'Local VPS runtime' : origin || (site.kind === 'cms' ? 'pending Cloudflare Worker' : 'served from KV bundle');
   const baseUrl = publicHost ? `https://${publicHost}` : (cmsInstance?.worker_url || '');
   const tabsHtml = h`<div class="tabs">${tabs.map(
     ([key, label]) => raw(`<a href="${P(c, `/sites/${site.id}`)}?tab=${key}" class="${tab === key ? 'on' : ''}">${esc(label)}</a>`),
@@ -292,7 +275,7 @@ export const detail: Handler = async (c) => {
     body = h`<div class="card tight">
       <div class="card-h"><h3>Domains</h3><div class="spacer"></div>
         <a class="btn sm ghost" href="${P(c, '/domains')}?site=${site.id}">Manage all domains</a></div>
-      ${site.kind === 'cms' ? h`<div class="card-b">
+      ${cloudCms ? h`<div class="card-b">
         <div class="row between"><strong>Cloudflare assigned domain</strong>${cmsAssigned ? badge('assigned', 'ok') : badge('pending', 'warn')}</div>
         <p>${cmsAssigned
           ? h`<a href="https://${cmsHost}" target="_blank" rel="noopener">https://${cmsHost}</a> — assigned by Cloudflare and ready to use.`
@@ -364,9 +347,9 @@ export const detail: Handler = async (c) => {
           </div>
           <dl class="kv" style="margin-top:14px">
             <dt>Slug</dt><dd class="mono">${site.slug}</dd>
-            <dt>Kind</dt><dd>${site.kind === 'cms' ? 'AMS CMS (isolated Worker)' : 'Static bundle / proxy'}</dd>
+            <dt>Kind</dt><dd>${onVps ? 'AMS CMS · VPS' : cloudCms ? 'AMS CMS · Cloudflare' : 'Static bundle / proxy'}</dd>
             <dt>Primary host</dt><dd class="mono">${site.primary_host || '—'} ${cmsAssigned && site.primary_host === cmsHost ? badge('Cloudflare assigned', 'ok') : ''}</dd>
-            ${site.kind === 'cms'
+            ${cloudCms
               ? h`<dt>Cloudflare domain</dt><dd class="mono">${cmsAssigned
                   ? h`<a href="https://${cmsHost}" target="_blank" rel="noopener">${cmsHost}</a> ${badge('assigned', 'ok')}`
                   : h`<span class="muted">not assigned yet</span> ${badge('pending', 'warn')}`}</dd>`
@@ -402,11 +385,11 @@ export const detail: Handler = async (c) => {
             <div class="form-grid">
               <div class="field"><label>Name</label><input type="text" name="name" value="${site.name}" required></div>
               <div class="field"><label>Primary host</label><input type="text" name="primary_host" value="${site.primary_host}" autocapitalize="none">
-                <p class="hint">${site.kind === 'cms' ? 'The assigned Cloudflare workers.dev domain is used until you add a custom domain.' : 'Hostname requests are routed to this site.'}</p></div>
+                <p class="hint">${cloudCms ? 'The assigned Cloudflare workers.dev domain is used until you add a custom domain.' : 'Hostname requests are routed to this site.'}</p></div>
             </div>
             <div class="field"><label>Admin slug</label><input type="text" name="admin_slug" value="${site.admin_slug}" pattern="[a-z0-9][a-z0-9\\-]{2,40}"${site.kind === 'cms' ? raw(' readonly') : ''}>
               <p class="hint">${site.kind === 'cms' ? 'The AMS CMS template uses the fixed /admin-panel path.' : 'Changing this immediately changes the CMS admin path.'}</p></div>
-            <div class="field"><label>${site.kind === 'cms' ? 'Provisioned CMS Worker origin' : 'Origin URL'}</label><input type="url" name="node_url" value="${site.node_url}" placeholder="https://origin.example.net"${site.kind === 'cms' ? raw(' readonly') : ''}></div>
+            ${onVps ? '' : h`<div class="field"><label>${site.kind === 'cms' ? 'Provisioned CMS Worker origin' : 'Origin URL'}</label><input type="url" name="node_url" value="${site.node_url}" placeholder="https://origin.example.net"${site.kind === 'cms' ? raw(' readonly') : ''}></div>`}
             <div class="form-grid">
               <div class="field"><label>Health URL</label><input type="url" name="health_url" value="${site.health_url}"></div>
               <div class="field"><label>Git repository</label><input type="text" name="repo" value="${site.repo}"${site.kind === 'cms' ? raw(' readonly') : ''}></div>
@@ -418,7 +401,7 @@ export const detail: Handler = async (c) => {
       </div>
 
       <div class="stack">
-        ${site.kind === 'cms' ? h`<div class="card">
+        ${onVps ? h`<div class="card"><h3>VPS website</h3><p>Point the hostname at your VPS and forward HTTPS to the panel, then finish CMS setup.</p><a class="btn" href="${baseUrl}/install">Open installer</a></div>` : cloudCms ? h`<div class="card">
           <div class="row between" style="align-items:flex-start">
             <h3 style="margin:0">Isolated CMS deployment</h3>
             ${cmsInstance?.status === 'active'
@@ -446,7 +429,7 @@ export const detail: Handler = async (c) => {
                   ? h`<div class="note warn" style="margin-top:10px">
                       <div class="row" style="gap:8px;align-items:flex-start"><span style="color:var(--warn)">${raw(icons.warning)}</span>
                         <div><b style="font-size:.87rem">Cloudflare API keys are not attached</b>
-                          <div class="muted" style="font-size:.82rem">Add an account ID and API token once and every future CMS site gets its Cloudflare domain on creation.</div></div></div>
+                          <div class="muted" style="font-size:.82rem">Add an account ID and API token once and each new Cloudflare CMS site gets its Cloudflare domain on creation.</div></div></div>
                       <a class="btn sm" href="${P(c, '/cloudflare/keys')}" style="margin-top:10px">${raw(icons.shieldcheck)} Attach Cloudflare API keys</a>
                     </div>`
                   : ''}
@@ -546,6 +529,7 @@ export const provisionCmsSite: Handler = async (c) => {
   if (csrf) return csrf;
   const site = await getSite(c.env.DB, c.params.id);
   if (!site) return flashRedirect(c, P(c, '/sites'), 'err', 'Site not found.');
+  if (site.hosting === 'vps') return flashRedirect(c, P(c, `/sites/${site.id}`), 'err', 'This site runs on the VPS.');
   if (site.kind !== 'cms') return flashRedirect(c, P(c, `/sites/${site.id}`), 'err', 'Automatic CMS deployment is only available for CMS sites.');
   try {
     const instance = await provisionCms(c.env, site);
@@ -620,9 +604,12 @@ export const remove: Handler = async (c) => {
   const site = await getSite(c.env.DB, c.params.id);
   if (!site) return flashRedirect(c, P(c, '/sites'), 'err', 'Site not found.');
   try {
-    await deleteCmsInstance(c.env, site.id);
+    if (site.hosting === 'vps') {
+      if (!c.env.VPS_CMS) throw new Error('VPS runtime unavailable');
+      await c.env.VPS_CMS.remove(site.id);
+    } else await deleteCmsInstance(c.env, site.id);
   } catch (err) {
-    return flashRedirect(c, P(c, `/sites/${site.id}`), 'err', `CMS resources were not fully deleted: ${String((err as Error)?.message ?? err).slice(0, 240)} Open Cloudflare API keys in the sidebar, reconnect the account, then delete the site again.`);
+    return flashRedirect(c, P(c, `/sites/${site.id}`), 'err', `CMS resources were not fully deleted: ${String((err as Error)?.message ?? err).slice(0, 240)} Check the hosting connection and retry.`);
   }
   // Remove stored files before the rows that point at them.
   const media = await all<any>(c.env.DB, 'SELECT key FROM media WHERE site_id=?', [site.id]);
@@ -650,6 +637,7 @@ export const preview: Handler = async (c) => {
   const site = await getSite(c.env.DB, c.params.id);
   if (!site) return new Response('Site not found', { status: 404 });
 
+  if (site.hosting === 'vps' && site.primary_host) return redirect(`https://${site.primary_host}/`);
   if (site.node_url) {
     try {
       const target = new URL(site.node_url);

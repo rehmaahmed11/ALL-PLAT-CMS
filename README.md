@@ -53,6 +53,57 @@ Storage is `node:sqlite` (a D1 look-alike in `local/d1.mjs`) and a folder for KV
 (`local/kv.mjs`), so the *same* worker source serves the preview. Data lands in
 `local/data/` — delete that folder to start over.
 
+## Choose where a new CMS site runs
+
+Go to **Sites → New site** and choose a destination for that site. The panel
+never moves other sites. Existing CMS sites keep the Cloudflare destination.
+
+- **My VPS** (Node runner, Node 22.18+): enter a hostname you own. The panel
+  runs the bundled CMS locally and creates `local/data/sites/<site-id>/cms.sqlite`
+  and `kv/`. No Cloudflare keys are used. The sites share the Node service but
+  have separate storage and CMS module state. Only the shipped CMS runs locally.
+- **My Cloudflare account** (either runner): connect an account under
+  **Cloudflare API keys**. Creation deploys the existing CMS Worker, D1 and KV
+  in that account. Without keys, the panel saves the site so you can connect
+  and retry later. A Cloudflare Worker cannot directly provision a remote VPS.
+- **Static bundle / external proxy** continues to work as before.
+
+### Connect a VPS hostname
+
+Point the panel and site hostnames at the VPS with DNS A records. For example,
+run `HOST=127.0.0.1 PANEL_HOST=panel.example.com npm run local` behind Caddy.
+Set a private `PANEL_SETUP_TOKEN` before starting, keep the Node process running
+with a service manager, and allow ports 80/443 to Caddy. Example Caddyfile:
+
+```caddyfile
+panel.example.com, shop.example.com {
+    reverse_proxy 127.0.0.1:8787
+}
+```
+
+Create the panel owner at `https://panel.example.com/_panel/install`, then add
+**Shop → My VPS → shop.example.com**. Finish the separate site installer at
+`https://shop.example.com/install` before opening the site to others. To add a
+custom alias, register it in **Domains**, point its DNS at the same VPS, and
+include it in the reverse proxy configuration. The panel selects the site using
+the incoming hostname; it does not buy domains, change DNS, or issue certificates.
+
+Keep `local/data/` on persistent disk and back it up (stop the service for a
+consistent filesystem copy). Deleting a VPS site deletes that site's storage.
+Panel snapshot ZIPs are not backups of a CMS database. The Node runner serves
+HTTP requests; it does not run Cloudflare scheduled triggers.
+
+### Test the VPS setup
+
+Run `npm run test:vps` on Node 22.18+ to exercise the real Node server over
+loopback HTTP with fresh temporary data. With OpenSSL installed, this also
+checks a custom hostname through a TLS reverse proxy using a temporary test
+certificate. The test stops and restarts the server, checks both sites again,
+and removes only its own temporary files. No domain, Cloudflare keys, or public
+ports are needed. It does not test public DNS or public certificate issuance.
+The server normally uses `local/data/`; `PANEL_DATA_DIR` selects a different
+persistent directory if needed.
+
 ## Deploy to Cloudflare's free plan
 
 ```bash

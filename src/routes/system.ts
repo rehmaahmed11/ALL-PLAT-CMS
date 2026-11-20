@@ -412,6 +412,10 @@ export const systemAction: Handler = async (c) => {
     await audit(c, 'system.sessions', 'panel', null);
     return flashRedirect(c, P(c, '/login'), 'ok', 'Every session was signed out. Sign in again.');
   }
+  if ((action === 'wipe-data' || action === 'factory-reset') && c.env.VPS_CMS) {
+    const localSites = await all<{ id: string }>(c.env.DB, "SELECT id FROM sites WHERE kind='cms' AND hosting='vps'");
+    for (const site of localSites) await c.env.VPS_CMS.remove(site.id);
+  }
   if (action === 'wipe-data') {
     const siteRows = await all<any>(c.env.DB, 'SELECT id FROM sites');
     const media = await all<any>(c.env.DB, 'SELECT key FROM media');

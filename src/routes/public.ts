@@ -32,10 +32,12 @@ const HOP_BY_HOP = new Set([
 export async function serveSiteHost(request: Request, env: Env, ctx: ExecutionContext, url: URL): Promise<Response> {
   const forced = url.searchParams.get('site');
   let site: Site | null = null;
-  if (forced) {
+  const hostSite = await siteByHost(env.DB, url.hostname);
+  if (forced && hostSite?.hosting !== 'vps') {
     site = await one<Site>(env.DB, 'SELECT * FROM sites WHERE slug=? OR id=?', [forced, forced]);
   }
-  if (!site) site = await siteByHost(env.DB, url.hostname);
+  // Never run a stateful VPS CMS under a different site's hostname.
+  if (!site || site.hosting === 'vps') site = hostSite;
 
   if (!site) return noSitePage(url, env);
 
@@ -47,6 +49,11 @@ export async function serveSiteHost(request: Request, env: Env, ctx: ExecutionCo
     return htmlPage(503, 'Under maintenance', esc(settings.maintenanceMessage), 120);
   }
 
+  if (site.kind === 'cms' && site.hosting === 'vps') {
+    if (!env.VPS_CMS) return new Response('VPS runtime unavailable', { status: 503 });
+    try { return await env.VPS_CMS.fetch(site.id, request, ctx); }
+    catch { return new Response('VPS CMS unavailable', { status: 503 }); }
+  }
   if (site.node_url) return proxyToOrigin(request, site, url);
   return serveStatic(request, env, site, url, ctx);
 }

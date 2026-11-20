@@ -62,7 +62,7 @@ export const page: Handler = async (c) => {
             : 'Saved in this panel, encrypted at rest.'}</dd>
           ${status.setAt ? h`<dt>Saved</dt><dd>${timeAgo(status.setAt)}</dd>` : ''}
         </dl>`
-      : h`<p class="muted" style="font-size:.85rem;margin-top:10px">Attach a Cloudflare account ID and API token here. New CMS sites will then receive their own Worker and an assigned <span class="mono">workers.dev</span> domain automatically.</p>`}
+      : h`<p class="muted" style="font-size:.85rem;margin-top:10px">Attach a Cloudflare account ID and API token here. Sites you place on Cloudflare will then receive their own Worker and an assigned <span class="mono">workers.dev</span> domain automatically.</p>`}
 
     ${status.source === 'env'
       ? h`<div class="note warn" style="margin-top:12px">Worker secrets are already active. Values pasted below are stored for fallback but will not override the secrets.</div>`
@@ -114,7 +114,7 @@ export const page: Handler = async (c) => {
   const whatCard = h`<div class="card">
     <h3>What these keys unlock</h3>
     <div class="col" style="gap:9px;font-size:.86rem">
-      <div class="row" style="gap:8px">${raw(icons.globe)} A Cloudflare <span class="mono">workers.dev</span> domain is assigned and shown on each new CMS site.</div>
+      <div class="row" style="gap:8px">${raw(icons.globe)} A Cloudflare <span class="mono">workers.dev</span> domain is assigned and shown on each new Cloudflare CMS site.</div>
       <div class="row" style="gap:8px">${raw(icons.server)} One isolated Worker per site.</div>
       <div class="row" style="gap:8px">${raw(icons.database)} A dedicated D1 database and KV namespace per site.</div>
       <div class="row" style="gap:8px">${raw(icons.check)} Admin and health URLs use the assigned domain immediately.</div>
@@ -131,7 +131,7 @@ export const page: Handler = async (c) => {
         : ''}
     </div>
     ${pending.length === 0
-      ? empty('check', 'Nothing waiting', 'Every CMS site has been assigned a Cloudflare domain.')
+      ? empty('check', 'Nothing waiting', 'No Cloudflare CMS sites are waiting for a domain.')
       : h`<table><thead><tr><th>Site</th><th>Cloudflare domain</th><th></th></tr></thead><tbody>
           ${pending.map((row) => h`<tr>
             <td><a href="${P(c, `/sites/${row.site_id}`)}"><b>${row.site_name || row.site_id}</b></a></td>
@@ -159,7 +159,7 @@ export const page: Handler = async (c) => {
   </div>`;
 
   const body = h`
-    ${pageHeader('Cloudflare API keys', 'Attach your Cloudflare account once — new CMS sites get an assigned workers.dev domain automatically',
+    ${pageHeader('Cloudflare API keys', 'Attach your Cloudflare account once — Cloudflare CMS sites get an assigned workers.dev domain automatically',
       h`<a class="btn ghost" href="${P(c, '/cloudflare')}">${raw(icons.server)} Deployment settings</a>`)}
     <div class="grid g4" style="margin-bottom:16px">
       ${checkRow(status.configured, '1 · Attach API keys', status.configured
