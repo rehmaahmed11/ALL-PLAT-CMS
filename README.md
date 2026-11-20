@@ -73,6 +73,11 @@ never moves other sites. Existing CMS sites keep the Cloudflare destination.
   and retry later. A Cloudflare Worker cannot directly provision a remote VPS.
 - **Static bundle / external proxy** continues to work as before.
 
+To install a CMS on your own computer, choose **My VPS** and give it a
+unique hostname such as `shop.localhost`. Open <http://shop.localhost:8787/install>
+from the same computer. The bare `localhost` URL does not select that site.
+
+
 ### Connect a VPS hostname
 
 Point the panel and site hostnames at the VPS with DNS A records. For example,

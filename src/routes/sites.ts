@@ -202,7 +202,7 @@ export const create: Handler = async (c) => {
       const message = trial
         ? `Site created on your VPS. Trial URL: https://${site.primary_host}/install. Add your custom domain later in site Settings.`
         : site.primary_host
-          ? `Site created on your VPS. Open https://${site.primary_host}/install after connecting the domain.`
+          ? `Site created on your VPS. Open ${vpsSiteUrl(c, site.primary_host)}/install after connecting the domain.`
           : 'Site created on your VPS with no hostname yet. Add a hostname on the site Domains page to open the installer.';
       return flashRedirect(c, P(c, `/sites/${site.id}`), 'ok', message);
     }
@@ -281,10 +281,10 @@ export const detail: Handler = async (c) => {
     : '';
   const cmsAssigned = Boolean(cmsHost);
   const publicHost = site.primary_host || cmsHost;
-  const adminUrl = publicHost ? `https://${publicHost}/${site.admin_slug}` : `/${site.admin_slug}`;
+  const baseUrl = publicHost ? (onVps ? vpsSiteUrl(c, publicHost) : `https://${publicHost}`) : (cmsInstance?.worker_url || '');
+  const adminUrl = baseUrl ? `${baseUrl}/${site.admin_slug}` : `/${site.admin_slug}`;
   const healthDisplay = site.health_url || (publicHost ? `https://${publicHost}/api/health` : '—');
   const originDisplay = onVps ? 'Local VPS runtime' : origin || (site.kind === 'cms' ? 'pending Cloudflare Worker' : 'served from KV bundle');
-  const baseUrl = publicHost ? `https://${publicHost}` : (cmsInstance?.worker_url || '');
   const vpsPreviewDomain = cleanHost(c.env.VPS_PREVIEW_DOMAIN || '');
   const isVpsTrialHost = onVps && Boolean(vpsPreviewDomain && site.primary_host.endsWith(`.${vpsPreviewDomain}`));
   const tabsHtml = h`<div class="tabs">${tabs.map(
@@ -440,7 +440,7 @@ export const detail: Handler = async (c) => {
       <div class="stack">
         ${onVps ? h`<div class="card"><h3>VPS website</h3><p>${isVpsTrialHost
           ? h`Trial URL: <a class="mono" href="${baseUrl}" target="_blank" rel="noopener">${site.primary_host}</a>. You can replace it with your custom domain in Settings when ready.`
-          : 'Point the hostname at your VPS and forward HTTPS to the panel, then finish CMS setup.'}</p><a class="btn" href="${baseUrl}/install" target="_blank" rel="noopener">${isVpsTrialHost ? 'Open trial installer' : 'Open installer'}</a></div>` : cloudCms ? h`<div class="card">
+          : 'Point the hostname at your VPS and forward HTTPS to the panel, then finish CMS setup.'}</p>${baseUrl ? h`<a class="btn" href="${baseUrl}/install" target="_blank" rel="noopener">${isVpsTrialHost ? 'Open trial installer' : 'Open installer'}</a>` : h`<p>Add a hostname on the Domains tab to open the installer.</p>`}</div>` : cloudCms ? h`<div class="card">
           <div class="row between" style="align-items:flex-start">
             <h3 style="margin:0">Isolated CMS deployment</h3>
             ${cmsInstance?.status === 'active'
@@ -666,6 +666,12 @@ export const remove: Handler = async (c) => {
   return flashRedirect(c, P(c, '/sites'), 'ok', `Site "${site.name}" deleted.`);
 };
 
+function vpsSiteUrl(c: Ctx, host: string): string {
+  const local = host === 'localhost' || host.endsWith('.localhost');
+  if (local) return `${c.url.protocol}//${host}${c.url.port ? ':' + c.url.port : ''}`;
+  return `https://${host}`;
+}
+
 /**
  * GET /sites/:id/preview — serve the active bundle (or proxy the origin) so the
  * panel can show the site inline before DNS is switched over.
@@ -676,7 +682,7 @@ export const preview: Handler = async (c) => {
   const site = await getSite(c.env.DB, c.params.id);
   if (!site) return new Response('Site not found', { status: 404 });
 
-  if (site.hosting === 'vps' && site.primary_host) return redirect(`https://${site.primary_host}/`);
+  if (site.hosting === 'vps' && site.primary_host) return redirect(`${vpsSiteUrl(c, site.primary_host)}/`);
   if (site.node_url) {
     try {
       const target = new URL(site.node_url);
