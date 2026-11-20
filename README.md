@@ -91,6 +91,24 @@ custom alias, register it in **Domains**, point its DNS at the same VPS, and
 include it in the reverse proxy configuration. The panel selects the site using
 the incoming hostname; it does not buy domains, change DNS, or issue certificates.
 
+#### Optional automatic trial URLs
+
+To let VPS sites start before a customer provides their final domain, start the
+Node panel with `VPS_PREVIEW_DOMAIN=trial.example.com npm run local` (or set the
+same variable in its service manager). Create a
+wildcard DNS record `*.trial.example.com` pointing to the VPS, and configure the
+reverse proxy to forward those hostnames to the panel with a valid HTTPS
+certificate (wildcard certificates generally require DNS-based ACME validation).
+The New Site form can then leave the VPS hostname blank; the panel assigns a
+unique address such as `flamingo-castle-a1b2c3.trial.example.com`. When the
+customer is ready, replace the primary host in site Settings with their own
+domain. The trial hostname remains as an alias until removed.
+
+The application only creates the hostname record in its own database. It does
+not create wildcard DNS records, configure the reverse proxy, or issue TLS
+certificates. Do not enable this option until wildcard DNS and HTTPS routing
+are already working.
+
 Keep `local/data/` on persistent disk and back it up (stop the service for a
 consistent filesystem copy). Deleting a VPS site deletes that site's storage.
 Panel snapshot ZIPs are not backups of a CMS database. The Node runner serves
@@ -127,12 +145,13 @@ authenticating. For existing data or manual bindings, see
 Tested bundle: **254 KiB uploaded, 64 KiB gzipped** — well inside the free
 Worker size limit.
 
-### Configuration (optional Worker variables)
+### Configuration (optional variables)
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PANEL_PATH` | `/_panel` | Where the panel lives. Change it to hide the panel at a non-obvious path. |
 | `PANEL_HOST` | *(any host)* | Serve the panel only on this hostname, e.g. `panel.example.com`. |
+| `VPS_PREVIEW_DOMAIN` | *(unset)* | Node/VPS runner only: base domain for generated trial hosts. Requires wildcard DNS and HTTPS routing; use a base hostname such as `trial.example.com`, not `*.trial.example.com`. |
 | `PANEL_SETUP_TOKEN` | *(unset)* | Required by the installer when set. Use a secret, not a plain var. |
 | `PANEL_NAME` | `AMS Cloud Panel` | Brand shown in the sidebar and login screen. |
 | `KDF_ITERATIONS` | `100000` | Lower to `50000` if you ever hit the free plan's 10 ms CPU cap at login. |

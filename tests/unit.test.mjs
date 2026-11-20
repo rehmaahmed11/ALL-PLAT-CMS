@@ -7,7 +7,7 @@ import { makeZip, crc32 } from '../src/lib/deploy.ts';
 import { readZipIndex, extractEntry, resolvePath, mimeFor } from '../src/lib/zip.ts';
 import { hashPassword, verifyPassword, timingSafeEqual, generatePassword } from '../src/lib/crypto.ts';
 import { cleanHost, validHost, validSlug, createSite } from '../src/lib/sites.ts';
-import { ensureSchema } from '../src/db/index.ts';
+import { ensureSchema, resetSchemaMemo } from '../src/db/index.ts';
 import { LocalD1 } from '../local/d1.mjs';
 import { Router } from '../src/lib/router.ts';
 import { h, esc, SafeHtml, bytesHuman } from '../src/lib/http.ts';
@@ -88,6 +88,16 @@ test('new CMS sites use the CMS template admin path', async () => {
   const site = await createSite(db, { name: 'Example CMS', kind: 'cms', primaryHost: 'example.com' });
   assert.equal(site.admin_slug, 'admin-panel');
   assert.equal(site.repo, '');
+});
+
+test('site names may contain @ signs and spaces', async () => {
+  const db = new LocalD1(':memory:');
+  await resetSchemaMemo();
+  await ensureSchema(db);
+  const site = await createSite(db, { name: '@flamingo castle@', kind: 'cms', primaryHost: '' });
+  assert.equal(site.name, '@flamingo castle@');
+  assert.equal(site.slug, 'flamingo-castle');
+  assert.equal(site.primary_host, '');
 });
 
 test('host and slug validation rejects junk', () => {
