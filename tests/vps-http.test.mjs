@@ -69,6 +69,24 @@ test('Linux VPS: panel, CMS, domains, files and restart over HTTP', async t => {
   const noHost = flash(await post('/sites/new', { target: 'vps', name: 'No Host' }));
   assert.equal(noHost.k, 'ok');
   assert.match(noHost.t, /no hostname yet.*Add a hostname/i);
+  const localId = await add('vps', 'Local Shop', 'shop.localhost');
+  const localOrigin = `http://shop.localhost:${server.port}`;
+  const localRequest = path => new Promise((resolve, reject) => {
+    const req = request({ hostname: '127.0.0.1', port: server.port, path, headers: {
+      host: `shop.localhost:${server.port}`, cookie: session,
+    } }, res => {
+      res.setEncoding('utf8');
+      let text = '';
+      res.on('data', chunk => { text += chunk; });
+      res.on('end', () => resolve({ status: res.statusCode, text, location: res.headers.location }));
+      res.on('error', reject);
+    });
+    req.on('error', reject).end();
+  });
+  const localOverview = await localRequest(`${pref}/sites/${localId}`);
+  assert.ok(localOverview.text.includes(`href="${localOrigin}/install"`));
+  assert.equal((await localRequest(`${pref}/sites/${localId}/preview`)).location, `${localOrigin}/`);
+  assert.equal((await localRequest('/install')).status, 200);
   const shopId = await add('vps', 'Shop', shop);
   const blogId = await add('vps', 'Blog', blog);
   assert.equal(flash(await post('/sites/new', { target: 'vps', name: 'Duplicate', host: shop })).k, 'err');
