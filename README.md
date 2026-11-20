@@ -35,7 +35,7 @@ src/
 ├── scripts/
 │   ├── bundle.mjs          `npm run build`: regenerate schema + bundle check into dist/
 │   ├── build-schema.mjs    schema.sql → schema.generated.ts
-│   ├── adopt-resources.mjs postinstall: adopt existing KV/D1 ids into wrangler.toml
+│   ├── adopt-resources.mjs `npm run cloudflare:adopt`: adopt existing KV/D1 IDs
 │   └── make-bundle.mjs     zip a folder into an uploadable site bundle
 ├── wrangler.toml
 └── package.json
@@ -48,7 +48,10 @@ npm install
 npm run local            # http://localhost:8787/_panel
 ```
 
-Node 22.18+ runs the TypeScript directly through its built-in type stripping.
+Use Node 22.18 or later on Windows, macOS, or Linux. The runner loads
+TypeScript directly, and neither command needs Wrangler login or Cloudflare
+credentials. Open <http://localhost:8787/_panel> to start the setup wizard.
+
 Storage is `node:sqlite` (a D1 look-alike in `local/d1.mjs`) and a folder for KV
 (`local/kv.mjs`), so the *same* worker source serves the preview. Data lands in
 `local/data/` — delete that folder to start over.
@@ -116,9 +119,10 @@ npm run deploy
 The panel D1 database and KV namespace are **both named `AMS-HOSTING-PANEL`**;
 Worker bindings remain `DB` and `KV`. Use `npm run deploy` (also as the
 Workers Builds deploy command) so the predeploy hook finds or creates both
-by exact name and pins their IDs before Wrangler runs. For existing data or
-manual bindings, see [`docs/DEPLOY.md`](docs/DEPLOY.md). Open
-`https://<your-worker>.workers.dev/_panel` and complete the installer.
+by exact name and pins their IDs before Wrangler runs. To look up existing IDs
+without deploying or creating resources, run `npm run cloudflare:adopt` after
+authenticating. For existing data or manual bindings, see
+[`docs/DEPLOY.md`](docs/DEPLOY.md). Open `https://<your-worker>.workers.dev/_panel` and complete the installer.
 
 Tested bundle: **254 KiB uploaded, 64 KiB gzipped** — well inside the free
 Worker size limit.

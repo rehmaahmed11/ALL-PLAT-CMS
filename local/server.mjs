@@ -5,9 +5,9 @@
  *   node local/server.mjs            # http://localhost:8787
  *   PORT=3000 node local/server.mjs
  *
- * TypeScript is loaded through Node's built-in type stripping (Node >= 22.18,
- * or `node --experimental-strip-types`). Storage is node:sqlite for D1 and a
- * folder on disk for KV, so nothing here depends on Cloudflare.
+ * TypeScript is loaded through Node's built-in type stripping (Node >= 22.18).
+ * Storage is node:sqlite for D1 and a folder on disk for KV, so nothing here
+ * depends on Cloudflare.
  */
 
 import { createServer } from 'node:http';
@@ -52,12 +52,14 @@ const env = {
 
 let worker;
 try {
-  worker = (await import(join(root, 'src/index.ts'))).default;
+  // ESM needs a file URL rather than a drive-letter path on Windows.
+  worker = (await import(new URL('../src/index.ts', import.meta.url).href)).default;
 } catch (err) {
   console.error('\nCould not load the Worker source.\n');
   console.error(String(err?.stack ?? err));
-  console.error('\nThis runner needs Node 22.18+ (built-in TypeScript stripping) or run:');
-  console.error('  node --experimental-strip-types local/server.mjs\n');
+  if (err?.code === 'ERR_UNKNOWN_FILE_EXTENSION') {
+    console.error('\nRun with Node 22.18+ and built-in TypeScript stripping enabled.');
+  }
   process.exit(1);
 }
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Adopt existing IDs on install; on --provision also create missing resources
+/** Adopt existing IDs on request; on --provision also create missing resources
  * by exact name and stop deployment if a binding could not be resolved. */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';

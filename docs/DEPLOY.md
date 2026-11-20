@@ -13,10 +13,12 @@ npm run deploy
 Use `npm run deploy` as the deploy command, including in Workers Builds.
 The predeploy hook finds or creates the panel D1 and KV resources by exact
 name (`AMS-HOSTING-PANEL`) and writes their IDs to `wrangler.toml`. If it
-cannot resolve a missing ID, deployment stops. The install hook only looks
-up existing IDs and is best-effort. Do not bypass predeploy with a bare
-`wrangler deploy` unless both IDs are already configured: Wrangler can
-otherwise derive a different KV namespace title.
+cannot resolve a missing ID, deployment stops. `npm install` does not contact
+Cloudflare or change `wrangler.toml`. To look up and pin existing IDs without
+creating resources or deploying, authenticate Wrangler and run
+`npm run cloudflare:adopt`. Do not bypass predeploy with a bare `wrangler deploy`
+unless both IDs are already configured: Wrangler can otherwise derive a
+different KV namespace title.
 
 **Existing installations:** changing a name in the repo does not rename live
 resources or copy their data. Back up and migrate your panel D1 and KV data
@@ -79,11 +81,12 @@ npx wrangler deploy --dry-run --outdir dist
 ## C. Local only
 
 ```bash
+npm install
 npm run local     # http://localhost:8787/_panel, storage in local/data/
 ```
 
-Node 22.18+ runs the TypeScript directly. The local runner binds `0.0.0.0` so it
-also works inside a container or a remote preview.
+Use Node 22.18 or later. No Cloudflare credentials are needed. The local runner
+binds `0.0.0.0` so it also works inside a container or a remote preview.
 
 ## Attaching customer sites
 
