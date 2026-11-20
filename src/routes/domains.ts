@@ -47,7 +47,7 @@ export const list: Handler = async (c) => {
                     <td class="mono">${d.host}</td>
                     <td><a href="${P(c, `/sites/${d.site_id}`)}">${d.site_name}</a></td>
                     <td>${badge(d.kind, d.kind === 'primary' ? 'info' : 'mute')}</td>
-                    <td>${statusBadge(d.status === 'active' ? 'live' : 'pending')}</td>
+                    <td>${d.status === 'failed' ? badge('🔴 not linked', 'err') : d.last_dns_ok ? statusBadge('live') : statusBadge('pending')}</td>
                     <td>
                       ${d.last_dns_at
                         ? h`<span class="muted" style="font-size:.8rem">${d.last_dns_ok ? '✓ ' : '⚠ '}${esc(d.last_dns_note || (d.last_dns_ok ? 'ok' : 'issue'))}<br><span style="font-size:.72rem">${timeAgo(d.last_dns_at)}</span></span>`

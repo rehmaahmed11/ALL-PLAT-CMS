@@ -9,6 +9,7 @@ import {
   ValidationError, statusLabel,
 } from '../lib/sites.ts';
 import { checkSite, uptimeFor } from '../lib/monitor.ts';
+import { domainLinkState } from '../lib/dns.ts';
 import { all, batch, count, one, run, id } from '../db/index.ts';
 import { generatePassword, slugToken } from '../lib/crypto.ts';
 import { audit } from '../lib/audit.ts';
@@ -287,6 +288,14 @@ export const detail: Handler = async (c) => {
   const originDisplay = onVps ? 'Local VPS runtime' : origin || (site.kind === 'cms' ? 'pending Cloudflare Worker' : 'served from KV bundle');
   const vpsPreviewDomain = cleanHost(c.env.VPS_PREVIEW_DOMAIN || '');
   const isVpsTrialHost = onVps && Boolean(vpsPreviewDomain && site.primary_host.endsWith(`.${vpsPreviewDomain}`));
+  // Attach Domain card (VPS sites only): latest custom domain the user tried
+  // to attach, with its saved green/yellow/red DNS state.
+  const attachRow = onVps
+    ? ([...domainRows]
+        .filter((d) => !(vpsPreviewDomain && String(d.host).endsWith(`.${vpsPreviewDomain}`)))
+        .sort((a, b) => Number(b.created_at) - Number(a.created_at))[0] ?? null)
+    : null;
+  const attachState = attachRow ? domainLinkState(attachRow) : null;
   const tabsHtml = h`<div class="tabs">${tabs.map(
     ([key, label]) => raw(`<a href="${P(c, `/sites/${site.id}`)}?tab=${key}" class="${tab === key ? 'on' : ''}">${esc(label)}</a>`),
   )}</div>`;
@@ -325,7 +334,7 @@ export const detail: Handler = async (c) => {
               (d) => h`<tr>
                 <td class="mono">${d.host}</td>
                 <td>${badge(d.kind, d.kind === 'primary' ? 'info' : 'mute')}</td>
-                <td>${statusBadge(d.status === 'active' ? 'live' : 'pending')}</td>
+                <td>${d.status === 'failed' ? badge('🔴 not linked', 'err') : statusBadge(d.status === 'active' && d.last_dns_ok ? 'live' : 'pending')}</td>
                 <td class="muted" style="font-size:.82rem">${d.last_dns_at ? `${d.last_dns_ok ? 'ok' : 'issue'} · ${timeAgo(d.last_dns_at)}` : 'not checked'}</td>
                 <td class="num"><a class="btn sm ghost" href="${P(c, '/domains')}?site=${site.id}">Open</a></td>
               </tr>`,
@@ -438,6 +447,28 @@ export const detail: Handler = async (c) => {
       </div>
 
       <div class="stack">
+        ${onVps ? h`<div class="card">
+          <div class="row between" style="align-items:flex-start">
+            <h3 style="margin:0">Attach domain</h3>
+            ${attachRow
+              ? attachState === 'linked' ? badge('🟢 Linked', 'ok')
+                : attachState === 'failed' ? badge('🔴 Not linked', 'err')
+                : badge('🟡 Waiting', 'warn')
+              : badge('No domain yet', 'mute')}
+          </div>
+          ${attachRow
+            ? h`<p class="mono" style="margin:10px 0 4px">${attachRow.host}</p>
+                <p class="muted" style="font-size:.82rem;margin:0">${attachRow.last_dns_note || 'Not checked yet. Press Check again.'}</p>
+                <p class="muted" style="font-size:.78rem;margin:4px 0 0">Last check: ${attachRow.last_dns_at ? timeAgo(attachRow.last_dns_at) : 'never'}</p>`
+            : h`<p class="muted" style="font-size:.84rem;margin-top:10px">Connect your own domain name (for example from Namecheap), step by step. We show you the server IP, you add one record, we check everything.</p>`}
+          <div class="actions" style="margin-top:12px;flex-wrap:wrap">
+            <a class="btn sm primary" href="${P(c, `/sites/${site.id}/attach-domain?step=${attachRow ? `3&domain=${attachRow.id}` : '1'}`)}">${raw(icons.globe)} ${attachRow ? 'Open attach domain' : 'Attach domain'}</a>
+            ${attachRow ? h`<form method="post" action="${P(c, `/sites/${site.id}/attach-domain/check`)}" style="margin:0">${csrfInput(c)}
+              <input type="hidden" name="domain_id" value="${attachRow.id}">
+              <input type="hidden" name="back" value="settings">
+              <button class="btn sm">${raw(icons.refresh)} Check again</button></form>` : ''}
+          </div>
+        </div>` : ''}
         ${onVps ? h`<div class="card"><h3>VPS website</h3><p>${isVpsTrialHost
           ? h`Trial URL: <a class="mono" href="${baseUrl}" target="_blank" rel="noopener">${site.primary_host}</a>. You can replace it with your custom domain in Settings when ready.`
           : 'Point the hostname at your VPS and forward HTTPS to the panel, then finish CMS setup.'}</p>${baseUrl ? h`<a class="btn" href="${baseUrl}/install" target="_blank" rel="noopener">${isVpsTrialHost ? 'Open trial installer' : 'Open installer'}</a>` : h`<p>Add a hostname on the Domains tab to open the installer.</p>`}</div>` : cloudCms ? h`<div class="card">

@@ -32,6 +32,7 @@ const env = {
   PANEL_PATH: process.env.PANEL_PATH ?? '/_panel',
   PANEL_HOST: process.env.PANEL_HOST ?? '',
   VPS_PREVIEW_DOMAIN: process.env.VPS_PREVIEW_DOMAIN ?? '',
+  VPS_PUBLIC_IP: process.env.VPS_PUBLIC_IP ?? process.env.SERVER_IP ?? '',
   PANEL_SETUP_TOKEN: process.env.PANEL_SETUP_TOKEN ?? '',
   PANEL_NAME: process.env.PANEL_NAME ?? '',
   // Local stand-in for the Wrangler [assets] binding. The Worker asks for the

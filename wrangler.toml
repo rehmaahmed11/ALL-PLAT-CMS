@@ -52,6 +52,11 @@ crons = ["*/10 * * * *"]
 # [[routes]]
 # pattern = "panel.example.com"
 # custom_domain = true
+#
+# VPS runner only (set these in the Node process environment, not here):
+#   VPS_PUBLIC_IP   public IPv4 shown by the Attach Domain wizard
+#                   (SERVER_IP is accepted as an alias). Without it, the
+#                   wizard asks for the IP once and remembers it.
 
 [observability]
 enabled = true

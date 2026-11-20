@@ -65,6 +65,9 @@ export async function clearCounter(kv: KV, key: string): Promise<void> {
  * in KV under one key. D1 is the source of truth for everything relational.
  */
 export type PanelSettings = {
+  /** Public IPv4 of the VPS, saved from the Attach Domain wizard when the
+   *  operator has not set the VPS_PUBLIC_IP environment variable. */
+  vpsPublicIp: string;
   cmsRepository: string;
   panelName: string;
   tagline: string;
@@ -77,6 +80,7 @@ export type PanelSettings = {
 };
 
 export const DEFAULT_SETTINGS: PanelSettings = {
+  vpsPublicIp: '',
   cmsRepository: BUNDLED_CMS_REPOSITORY,
   panelName: 'AMS Cloud Panel',
   tagline: 'Multi-site hosting control panel on Cloudflare Workers',
