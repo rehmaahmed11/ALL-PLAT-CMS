@@ -462,7 +462,7 @@ export const detail: Handler = async (c) => {
                 <p class="muted" style="font-size:.78rem;margin:4px 0 0">Last check: ${attachRow.last_dns_at ? timeAgo(attachRow.last_dns_at) : 'never'}</p>`
             : h`<p class="muted" style="font-size:.84rem;margin-top:10px">Connect your own domain name (for example from Namecheap), step by step. We show you the server IP, you add one record, we check everything.</p>`}
           <div class="actions" style="margin-top:12px;flex-wrap:wrap">
-            <a class="btn sm primary" href="${P(c, `/sites/${site.id}/attach-domain?step=${attachRow ? `3&domain=${attachRow.id}` : '1'}`)}">${raw(icons.globe)} ${attachRow ? 'Open attach domain' : 'Attach domain'}</a>
+            <a class="btn sm primary" href="${P(c, `/sites/${site.id}/attach-domain?step=1`)}">${raw(icons.globe)} ${attachRow ? 'Edit domain and DNS instructions' : 'Attach domain'}</a>
             ${attachRow ? h`<form method="post" action="${P(c, `/sites/${site.id}/attach-domain/check`)}" style="margin:0">${csrfInput(c)}
               <input type="hidden" name="domain_id" value="${attachRow.id}">
               <input type="hidden" name="back" value="settings">

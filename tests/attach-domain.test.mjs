@@ -107,6 +107,12 @@ test('VPS wizard: save IP, attach domain, saved yellow status, VPS-only', async 
   assert.match(step3.text, /my-shop\.example\.test/);
   assert.match(step3.text, /Not linked yet|Waiting/);
 
+  const editLink = step3.text.match(/href="([^"]+)">Edit domain and DNS instructions/)[1];
+  const edit = await get(editLink.replace(pref, ''));
+  assert.match(edit.text, /45\.90\.10\.5<\/span><button type="button" data-copy/);
+  assert.match(edit.text, /Namecheap/);
+  assert.match(edit.text, /Check again: my-shop\.example\.test/);
+
   // …and Site Settings now shows the same saved domain in yellow.
   const detailAfter = await get(`/sites/${siteId}`);
   assert.match(detailAfter.text, /my-shop\.example\.test/);
