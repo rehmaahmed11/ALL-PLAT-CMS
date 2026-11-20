@@ -186,7 +186,7 @@ test('adopt leaves the file untouched when the namespace is absent', () => {
   assert.equal(readFileSync(join(dir, 'wrangler.toml'), 'utf8'), CONFIG);
 });
 
-test('adopt survives lookup failures (unauthenticated install)', () => {
+test('adopt survives lookup failures (unauthenticated Wrangler)', () => {
   const dir = fixtureDir(CONFIG);
   const warnings = [];
   const result = adopt({
