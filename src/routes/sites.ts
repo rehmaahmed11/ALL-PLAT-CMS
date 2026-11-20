@@ -9,7 +9,7 @@ import {
   ValidationError, statusLabel,
 } from '../lib/sites.ts';
 import { checkSite, uptimeFor } from '../lib/monitor.ts';
-import { all, count, one, run, id } from '../db/index.ts';
+import { all, batch, count, one, run, id } from '../db/index.ts';
 import { generatePassword, slugToken } from '../lib/crypto.ts';
 import { audit } from '../lib/audit.ts';
 import { errText } from '../lib/runtime.ts';
@@ -114,12 +114,12 @@ export const newForm: Handler = async (c) => {
           </div>
           <div class="field"><label>Primary hostname</label>
             <input type="text" name="host" placeholder="blog.example.com" autocapitalize="none" value="${q(c, 'host')}">
-            <p class="hint">No <span class="mono">https://</span>. Required for VPS sites. For Cloudflare, leave blank to use its assigned address. Aliases are managed on the Domains page.</p></div>
+            <p class="hint">No <span class="mono">https://</span>. For VPS, enter a hostname different from the panel, or leave blank${c.env.VPS_PREVIEW_DOMAIN ? h` to get an automatic trial URL under <span class="mono">${cleanHost(c.env.VPS_PREVIEW_DOMAIN)}</span>` : ' if VPS_PREVIEW_DOMAIN is configured'}. For Cloudflare, leave blank to use its assigned address. Aliases are managed on the Domains page.</p></div>
         </div>
 
         <div class="card">
           <h2>Hosting options</h2>
-          <p><b>My VPS:</b> Use a hostname you own. Point its DNS at the VPS and forward HTTPS to this panel. Each site has its own SQLite database and files.</p>
+          <p><b>My VPS:</b> Use a hostname you own, or leave it blank for an automatic trial URL if a wildcard preview domain is configured. Point DNS at the VPS and forward HTTPS to this panel. You can switch the site to your custom domain later in Settings. Each site has its own SQLite database and files.</p>
           <p><b>Cloudflare:</b> Create a Worker, D1 database, KV namespace and workers.dev address in your connected account.</p>
           <p>${cf.configured ? 'Cloudflare account connected.' : h`For Cloudflare hosting, <a href="${P(c, '/cloudflare/keys')}">connect your account</a>. VPS hosting needs no Cloudflare keys.`}</p>
         </div>
@@ -146,12 +146,26 @@ export const create: Handler = async (c) => {
     const target = String(f.get('target') ?? '');
     if (!['vps', 'cloudflare', 'node'].includes(target)) throw new ValidationError('Choose where this site should run.');
     const kind = target === 'node' ? 'node' : 'cms';
+    let previewDomain = '';
     if (target === 'vps') {
       if (!c.env.VPS_CMS) throw new ValidationError('VPS hosting requires the VPS runner.');
       const host = cleanHost(String(f.get('host') ?? ''));
-      if (!host || host === cleanHost(c.env.PANEL_HOST || c.host)) throw new ValidationError('Enter a site hostname different from the panel hostname.');
+      if (!host) {
+        if (!c.env.VPS_PREVIEW_DOMAIN) {
+          throw new ValidationError('Enter a site hostname, or configure VPS_PREVIEW_DOMAIN to enable automatic trial URLs.');
+        }
+        previewDomain = cleanHost(c.env.VPS_PREVIEW_DOMAIN);
+        if (!validHost(previewDomain)) {
+          throw new ValidationError('VPS_PREVIEW_DOMAIN must be a valid base hostname, for example trial.example.com (without *.).');
+        }
+      } else {
+        const panelHost = cleanHost(c.env.PANEL_HOST || c.host);
+        if (host === panelHost) {
+          throw new ValidationError(`The site hostname must differ from the panel hostname (${panelHost}). Use a separate hostname for this site.`);
+        }
+      }
     }
-    const site = await createSite(c.env.DB, {
+    let site = await createSite(c.env.DB, {
       name: String(f.get('name') ?? ''),
       kind,
       hosting: target === 'vps' ? 'vps' : 'cloudflare',
@@ -162,6 +176,22 @@ export const create: Handler = async (c) => {
     });
     if (target === 'vps') {
       try {
+        if (!site.primary_host) {
+          const trialHost = cleanHost(`${site.slug}-${site.id.slice(-6)}.${previewDomain}`);
+          if (!validHost(trialHost)) throw new ValidationError('Could not create a valid trial hostname from VPS_PREVIEW_DOMAIN.');
+          const panelHost = cleanHost(c.env.PANEL_HOST || c.host);
+          if (trialHost === panelHost) throw new ValidationError('The configured VPS trial hostname conflicts with the panel hostname.');
+          const siteClash = await one<any>(c.env.DB, 'SELECT id FROM sites WHERE primary_host=?', [trialHost]);
+          const domainClash = await one<any>(c.env.DB, 'SELECT id FROM domains WHERE host=?', [trialHost]);
+          if (siteClash || domainClash) throw new ValidationError(`Trial hostname ${trialHost} is already in use.`);
+          const now = Date.now();
+          await batch(c.env.DB, [
+            ['UPDATE sites SET primary_host=?, health_url=?, updated_at=? WHERE id=?', [trialHost, `https://${trialHost}/api/health`, now, site.id]],
+            ["INSERT INTO domains (id,site_id,host,kind,status,verify_token,created_at) VALUES (?,?,?,'primary','active',?,?)", [id('dom'), site.id, trialHost, slugToken(16), now]],
+          ]);
+          site.primary_host = trialHost;
+          site.health_url = `https://${trialHost}/api/health`;
+        }
         await c.env.VPS_CMS!.provision(site.id);
       } catch (err) {
         await c.env.VPS_CMS!.remove(site.id);
@@ -169,7 +199,11 @@ export const create: Handler = async (c) => {
         throw err;
       }
       await audit(c, 'site.create', 'site', site.id, { hosting: target, host: site.primary_host });
-      return flashRedirect(c, P(c, `/sites/${site.id}`), 'ok', `Site created on your VPS. Open https://${site.primary_host}/install after connecting the domain.`);
+      const trial = previewDomain && site.primary_host.endsWith(`.${previewDomain}`);
+      const message = trial
+        ? `Site created on your VPS. Trial URL: https://${site.primary_host}/install. Add your custom domain later in site Settings.`
+        : `Site created on your VPS. Open https://${site.primary_host}/install after connecting the domain.`;
+      return flashRedirect(c, P(c, `/sites/${site.id}`), 'ok', message);
     }
     await audit(c, 'site.create', 'site', site.id, { name: site.name, host: site.primary_host });
     if (kind === 'cms') {
@@ -250,6 +284,8 @@ export const detail: Handler = async (c) => {
   const healthDisplay = site.health_url || (publicHost ? `https://${publicHost}/api/health` : '—');
   const originDisplay = onVps ? 'Local VPS runtime' : origin || (site.kind === 'cms' ? 'pending Cloudflare Worker' : 'served from KV bundle');
   const baseUrl = publicHost ? `https://${publicHost}` : (cmsInstance?.worker_url || '');
+  const vpsPreviewDomain = cleanHost(c.env.VPS_PREVIEW_DOMAIN || '');
+  const isVpsTrialHost = onVps && Boolean(vpsPreviewDomain && site.primary_host.endsWith(`.${vpsPreviewDomain}`));
   const tabsHtml = h`<div class="tabs">${tabs.map(
     ([key, label]) => raw(`<a href="${P(c, `/sites/${site.id}`)}?tab=${key}" class="${tab === key ? 'on' : ''}">${esc(label)}</a>`),
   )}</div>`;
@@ -401,7 +437,9 @@ export const detail: Handler = async (c) => {
       </div>
 
       <div class="stack">
-        ${onVps ? h`<div class="card"><h3>VPS website</h3><p>Point the hostname at your VPS and forward HTTPS to the panel, then finish CMS setup.</p><a class="btn" href="${baseUrl}/install">Open installer</a></div>` : cloudCms ? h`<div class="card">
+        ${onVps ? h`<div class="card"><h3>VPS website</h3><p>${isVpsTrialHost
+          ? h`Trial URL: <a class="mono" href="${baseUrl}" target="_blank" rel="noopener">${site.primary_host}</a>. You can replace it with your custom domain in Settings when ready.`
+          : 'Point the hostname at your VPS and forward HTTPS to the panel, then finish CMS setup.'}</p><a class="btn" href="${baseUrl}/install" target="_blank" rel="noopener">${isVpsTrialHost ? 'Open trial installer' : 'Open installer'}</a></div>` : cloudCms ? h`<div class="card">
           <div class="row between" style="align-items:flex-start">
             <h3 style="margin:0">Isolated CMS deployment</h3>
             ${cmsInstance?.status === 'active'

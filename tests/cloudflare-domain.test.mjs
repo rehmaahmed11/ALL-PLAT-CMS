@@ -233,6 +233,29 @@ test('New Site keeps VPS and Cloudflare targets independent in one dashboard', a
   await create('', 'No Choice', 'no.example.com');
   await create('vps', 'No Host', '');
   assert.equal((await all(db, 'SELECT * FROM sites')).length, 0);
+
+  // A configured wildcard preview domain allows a VPS site to start without
+  // the customer's final domain; the custom hostname can be added later.
+  env.VPS_PREVIEW_DOMAIN = 'trial.example.test';
+  const trialCreated = await create('vps', '@flamingo castle@', '');
+  assert.equal(trialCreated.status, 303);
+  const trialSite = await one(db, "SELECT * FROM sites WHERE name='@flamingo castle@'");
+  assert.match(trialSite.primary_host, /^flamingo-castle-[a-z0-9]+\.trial\.example\.test$/);
+  assert.equal(trialSite.health_url, `https://${trialSite.primary_host}/api/health`);
+  const trialDomain = await one(db, 'SELECT * FROM domains WHERE site_id=? AND host=?', [trialSite.id, trialSite.primary_host]);
+  assert.equal(trialDomain.kind, 'primary');
+  assert.match(await (await visit(trialSite.primary_host, '/install')).text(), /Install|Create|Admin/i);
+
+  const customHost = 'flamingo-custom.example.test';
+  await post(`/_panel/sites/${trialSite.id}/edit`, {
+    name: '@flamingo castle@', primary_host: customHost, admin_slug: 'admin-panel',
+    health_url: `https://${customHost}/api/health`, notes: '',
+  });
+  const updatedTrial = await one(db, 'SELECT * FROM sites WHERE id=?', [trialSite.id]);
+  assert.equal(updatedTrial.primary_host, customHost);
+  assert.ok(await one(db, 'SELECT id FROM domains WHERE site_id=? AND host=?', [trialSite.id, trialSite.primary_host]));
+  assert.equal((await visit(trialSite.primary_host, '/install')).status, 200);
+
   await create('vps', 'Shop', 'shop.example.com');
   await create('vps', 'Blog', 'blog.example.com');
   const shop = await one(db, "SELECT * FROM sites WHERE name='Shop'");

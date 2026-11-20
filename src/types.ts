@@ -14,6 +14,8 @@ export type Env = {
   KV: any;
   /** Optional: hostname the panel is served on, e.g. panel.example.com */
   PANEL_HOST?: string;
+  /** Optional base domain for automatic VPS trial hosts; DNS/TLS wildcard must be configured separately. */
+  VPS_PREVIEW_DOMAIN?: string;
   /** Optional: path prefix for the panel. Defaults to /_panel */
   PANEL_PATH?: string;
   /** Optional: shared secret required by the first-run setup wizard. */
