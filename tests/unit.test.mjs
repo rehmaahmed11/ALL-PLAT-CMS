@@ -11,6 +11,7 @@ import { ensureSchema, resetSchemaMemo } from '../src/db/index.ts';
 import { LocalD1 } from '../local/d1.mjs';
 import { Router } from '../src/lib/router.ts';
 import { h, esc, SafeHtml, bytesHuman } from '../src/lib/http.ts';
+import { shell } from '../src/ui/layout.ts';
 
 test('zip writer produces an archive our reader can read back', async () => {
   const files = [
@@ -135,6 +136,27 @@ test('html template escapes interpolations but trusts SafeHtml', () => {
   assert.equal(String(h`<p>${new SafeHtml('<b>ok</b>')}</p>`), '<p><b>ok</b></p>');
   assert.equal(String(h`<p>${[1, 2, 3]}</p>`), '<p>123</p>');
   assert.equal(esc('"a" & \'b\''), '&quot;a&quot; &amp; &#39;b&#39;');
+});
+
+test('flash notifications are rendered dismissibly and their one-shot cookie is cleared', async () => {
+  const response = shell({
+    c: {
+      url: new URL('https://panel.example.test/_panel/sites/new'),
+      req: { headers: new Headers() },
+      panelPath: '/_panel',
+      flash: { kind: 'err', text: 'Could not create site.' },
+      user: null,
+      env: {},
+    },
+    title: 'New site',
+    active: '/sites',
+    body: h`<p>New site form</p>`,
+  });
+  const html = await response.text();
+  assert.equal(response.headers.get('set-cookie').includes('ams_flash=;'), true);
+  assert.match(response.headers.get('set-cookie'), /Max-Age=0/);
+  assert.match(html, /function amsCloseMessage\(\)/);
+  assert.match(html, /onclick="amsCloseMessage\(\)"/);
 });
 
 test('byte formatting reads naturally', () => {
