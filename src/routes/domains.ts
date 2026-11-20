@@ -28,7 +28,7 @@ export const list: Handler = async (c) => {
   const workerHost = c.env.PANEL_HOST || c.url.hostname;
 
   const body = h`
-    ${pageHeader('Domains', 'Every hostname routed to this Worker',
+    ${pageHeader('Domains', 'Hostnames connected to your sites',
       h`<a class="btn ghost" href="${P(c, '/sites')}">Sites</a>`)}
 
     <div class="split">
@@ -71,6 +71,7 @@ export const list: Handler = async (c) => {
 
         <div class="card">
           <h2>How routing works</h2>
+          ${c.env.VPS_CMS ? h`<p><b>VPS sites:</b> Point an A record at your VPS IP. Configure your HTTPS reverse proxy to forward this hostname to the panel, preserving the Host header. Adding a domain here does not change DNS or issue a certificate.</p>` : ''}
           <div class="grid g3">
             <div class="note"><b>1 · Cloudflare zone</b>
               <div class="muted" style="font-size:.83rem;margin-top:4px">Add the domain to Cloudflare, then attach it to this Worker with a <b>Custom Domain</b> or a route. DNS is created for you.</div></div>

@@ -14,22 +14,25 @@ import { createServer } from 'node:http';
 import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { vpsCms } from './vps-cms.mjs';
 import { LocalD1 } from './d1.mjs';
 import { LocalKV } from './kv.mjs';
 import { BUNDLED_TEMPLATE_FILE } from '../src/lib/cms-repository.js';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const dataDir = join(root, 'local', 'data');
+const dataDir = process.env.PANEL_DATA_DIR || join(root, 'local', 'data');
 await mkdir(dataDir, { recursive: true });
 
 const env = {
+  VPS_CMS: vpsCms(join(dataDir, 'sites')),
+  CF_API_TOKEN: process.env.CF_API_TOKEN,
+  CF_ACCOUNT_ID: process.env.CF_ACCOUNT_ID,
   DB: new LocalD1(join(dataDir, 'panel.sqlite')),
   KV: new LocalKV(join(dataDir, 'kv')),
   PANEL_PATH: process.env.PANEL_PATH ?? '/_panel',
   PANEL_HOST: process.env.PANEL_HOST ?? '',
   PANEL_SETUP_TOKEN: process.env.PANEL_SETUP_TOKEN ?? '',
   PANEL_NAME: process.env.PANEL_NAME ?? '',
-  INSECURE_COOKIES: '1',
   // Local stand-in for the Wrangler [assets] binding. The Worker asks for the
   // bundled CMS module by path; no filesystem access is needed in production.
   ASSETS: {
@@ -92,7 +95,8 @@ async function readBody(req) {
 
 const server = createServer(async (req, res) => {
   try {
-    const url = `http://${req.headers.host ?? `localhost:${PORT}`}${req.url}`;
+    const scheme = req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+    const url = `${scheme}://${req.headers.host ?? `localhost:${PORT}`}${req.url}`;
     const method = req.method ?? 'GET';
     const headers = toHeaders(req.headers);
     let body;
@@ -136,7 +140,7 @@ server.listen(PORT, HOST, () => {
   console.log('');
   console.log('  AMS Cloud Panel — local preview');
   console.log(`  ─────────────────────────────────────────`);
-  console.log(`  Panel    http://localhost:${PORT}${panelPath}`);
+  console.log(`  Panel    http://localhost:${server.address().port}${panelPath}`);
   console.log(`  Data     ${dataDir}`);
   console.log(`  Storage  node:sqlite (D1 shim) + folder (KV shim)`);
   console.log('');

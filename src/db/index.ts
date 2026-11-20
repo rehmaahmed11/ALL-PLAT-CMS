@@ -17,6 +17,7 @@ let schemaReady = false;
  * column error means the migration already ran — ignore exactly that case.
  */
 const ADDITIVE_MIGRATIONS = [
+  "ALTER TABLE sites ADD COLUMN hosting TEXT NOT NULL DEFAULT 'cloudflare'",
   'ALTER TABLE deployments ADD COLUMN files INTEGER NOT NULL DEFAULT 0',
   `CREATE TABLE IF NOT EXISTS cms_instances (
     site_id TEXT PRIMARY KEY,
@@ -35,8 +36,8 @@ async function runAdditiveMigrations(db: DB): Promise<void> {
   for (const sql of ADDITIVE_MIGRATIONS) {
     try {
       await db.prepare(sql).run();
-    } catch {
-      /* column already exists */
+    } catch (err) {
+      if (!/duplicate column name/i.test(String(err))) throw err;
     }
   }
 }

@@ -34,6 +34,11 @@ export type Env = {
   CMS_TEMPLATE_URL?: string;
   /** Static assets binding; holds the bundled CMS Worker template. */
   ASSETS?: any;
+  VPS_CMS?: {
+    provision(id: string): Promise<void>;
+    fetch(id: string, request: Request, ctx: ExecutionContext): Promise<Response>;
+    remove(id: string): Promise<void>;
+  };
 };
 
 export type Role = 'owner' | 'admin' | 'viewer';
@@ -61,6 +66,7 @@ export type Site = {
   name: string;
   slug: string;
   kind: SiteKind;
+  hosting: 'vps' | 'cloudflare';
   status: SiteStatus;
   primary_host: string;
   admin_slug: string;
