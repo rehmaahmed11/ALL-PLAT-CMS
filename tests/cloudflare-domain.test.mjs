@@ -231,11 +231,14 @@ test('New Site keeps VPS and Cloudflare targets independent in one dashboard', a
   await create('vps', 'Unavailable', 'no.example.com');
   env.VPS_CMS = vpsCms(root);
   await create('', 'No Choice', 'no.example.com');
-  await create('vps', 'No Host', '');
-  assert.equal((await all(db, 'SELECT * FROM sites')).length, 0);
+  const noHostCreated = await create('vps', 'No Host', '');
+  assert.equal(noHostCreated.status, 303);
+  const noHostSite = await one(db, "SELECT * FROM sites WHERE name='No Host'");
+  assert.ok(noHostSite);
+  assert.equal(noHostSite.primary_host, '');
 
   // A configured wildcard preview domain allows a VPS site to start without
-  // the customer's final domain; the custom hostname can be added later.
+  // the customer's final domain and gives it a trial host automatically.
   env.VPS_PREVIEW_DOMAIN = 'trial.example.test';
   const trialCreated = await create('vps', '@flamingo castle@', '');
   assert.equal(trialCreated.status, 303);

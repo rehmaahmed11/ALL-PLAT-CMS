@@ -61,10 +61,12 @@ Storage is `node:sqlite` (a D1 look-alike in `local/d1.mjs`) and a folder for KV
 Go to **Sites → New site** and choose a destination for that site. The panel
 never moves other sites. Existing CMS sites keep the Cloudflare destination.
 
-- **My VPS** (Node runner, Node 22.18+): enter a hostname you own. The panel
-  runs the bundled CMS locally and creates `local/data/sites/<site-id>/cms.sqlite`
-  and `kv/`. No Cloudflare keys are used. The sites share the Node service but
-  have separate storage and CMS module state. Only the shipped CMS runs locally.
+- **My VPS** (Node runner, Node 22.18+): enter a hostname you own, or leave it
+  blank and connect a domain later. If `VPS_PREVIEW_DOMAIN` is configured, a
+  blank hostname gets an automatic trial URL. The panel runs the bundled CMS
+  locally and creates `local/data/sites/<site-id>/cms.sqlite` and `kv/`. No
+  Cloudflare keys are used. Sites share the Node service but have separate
+  storage and CMS module state. Only the shipped CMS runs locally.
 - **My Cloudflare account** (either runner): connect an account under
   **Cloudflare API keys**. Creation deploys the existing CMS Worker, D1 and KV
   in that account. Without keys, the panel saves the site so you can connect

@@ -114,12 +114,12 @@ export const newForm: Handler = async (c) => {
           </div>
           <div class="field"><label>Primary hostname</label>
             <input type="text" name="host" placeholder="blog.example.com" autocapitalize="none" value="${q(c, 'host')}">
-            <p class="hint">No <span class="mono">https://</span>. For VPS, enter a hostname different from the panel, or leave blank${c.env.VPS_PREVIEW_DOMAIN ? h` to get an automatic trial URL under <span class="mono">${cleanHost(c.env.VPS_PREVIEW_DOMAIN)}</span>` : ' if VPS_PREVIEW_DOMAIN is configured'}. For Cloudflare, leave blank to use its assigned address. Aliases are managed on the Domains page.</p></div>
+            <p class="hint">No <span class="mono">https://</span>. For VPS, enter a hostname different from the panel, or leave blank to add a domain later${c.env.VPS_PREVIEW_DOMAIN ? h` or get an automatic trial URL under <span class="mono">${cleanHost(c.env.VPS_PREVIEW_DOMAIN)}</span>` : ''}. For Cloudflare, leave blank to use its assigned address. Aliases are managed on the Domains page.</p></div>
         </div>
 
         <div class="card">
           <h2>Hosting options</h2>
-          <p><b>My VPS:</b> Use a hostname you own, or leave it blank for an automatic trial URL if a wildcard preview domain is configured. Point DNS at the VPS and forward HTTPS to this panel. You can switch the site to your custom domain later in Settings. Each site has its own SQLite database and files.</p>
+          <p><b>My VPS:</b> Use a hostname you own, or leave it blank and add a domain later. If a wildcard preview domain is configured, a blank hostname gets an automatic trial URL. Point DNS at the VPS and forward HTTPS to this panel. Each site has its own SQLite database and files.</p>
           <p><b>Cloudflare:</b> Create a Worker, D1 database, KV namespace and workers.dev address in your connected account.</p>
           <p>${cf.configured ? 'Cloudflare account connected.' : h`For Cloudflare hosting, <a href="${P(c, '/cloudflare/keys')}">connect your account</a>. VPS hosting needs no Cloudflare keys.`}</p>
         </div>
@@ -151,11 +151,10 @@ export const create: Handler = async (c) => {
       if (!c.env.VPS_CMS) throw new ValidationError('VPS hosting requires the VPS runner.');
       const host = cleanHost(String(f.get('host') ?? ''));
       if (!host) {
-        if (!c.env.VPS_PREVIEW_DOMAIN) {
-          throw new ValidationError('Enter a site hostname, or configure VPS_PREVIEW_DOMAIN to enable automatic trial URLs.');
-        }
-        previewDomain = cleanHost(c.env.VPS_PREVIEW_DOMAIN);
-        if (!validHost(previewDomain)) {
+        // A VPS site can be provisioned before its domain is ready. It will be
+        // reachable once a hostname is added; preview URLs are optional.
+        previewDomain = cleanHost(c.env.VPS_PREVIEW_DOMAIN || '');
+        if (previewDomain && !validHost(previewDomain)) {
           throw new ValidationError('VPS_PREVIEW_DOMAIN must be a valid base hostname, for example trial.example.com (without *.).');
         }
       } else {
@@ -176,7 +175,7 @@ export const create: Handler = async (c) => {
     });
     if (target === 'vps') {
       try {
-        if (!site.primary_host) {
+        if (!site.primary_host && previewDomain) {
           const trialHost = cleanHost(`${site.slug}-${site.id.slice(-6)}.${previewDomain}`);
           if (!validHost(trialHost)) throw new ValidationError('Could not create a valid trial hostname from VPS_PREVIEW_DOMAIN.');
           const panelHost = cleanHost(c.env.PANEL_HOST || c.host);
@@ -202,7 +201,9 @@ export const create: Handler = async (c) => {
       const trial = previewDomain && site.primary_host.endsWith(`.${previewDomain}`);
       const message = trial
         ? `Site created on your VPS. Trial URL: https://${site.primary_host}/install. Add your custom domain later in site Settings.`
-        : `Site created on your VPS. Open https://${site.primary_host}/install after connecting the domain.`;
+        : site.primary_host
+          ? `Site created on your VPS. Open https://${site.primary_host}/install after connecting the domain.`
+          : 'Site created on your VPS with no hostname yet. Add a hostname on the site Domains page to open the installer.';
       return flashRedirect(c, P(c, `/sites/${site.id}`), 'ok', message);
     }
     await audit(c, 'site.create', 'site', site.id, { name: site.name, host: site.primary_host });

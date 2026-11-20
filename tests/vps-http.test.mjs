@@ -66,7 +66,9 @@ test('Linux VPS: panel, CMS, domains, files and restart over HTTP', async t => {
   assert.match(page.text, /My VPS/);
   csrf = page.text.match(/name="csrf" value="([^"]+)"/)[1];
   assert.equal((await post('/sites/new', { csrf: '', target: 'vps', name: 'Invalid', host: shop })).status, 403);
-  assert.equal(flash(await post('/sites/new', { target: 'vps', name: 'No Host' })).k, 'err');
+  const noHost = flash(await post('/sites/new', { target: 'vps', name: 'No Host' }));
+  assert.equal(noHost.k, 'ok');
+  assert.match(noHost.t, /no hostname yet.*Add a hostname/i);
   const shopId = await add('vps', 'Shop', shop);
   const blogId = await add('vps', 'Blog', blog);
   assert.equal(flash(await post('/sites/new', { target: 'vps', name: 'Duplicate', host: shop })).k, 'err');

@@ -1,5 +1,6 @@
 import type { Ctx } from '../types.ts';
-import { h, raw, esc, SafeHtml } from '../lib/http.ts';
+import { h, raw, esc, SafeHtml, cookie } from '../lib/http.ts';
+import { isSecureRequest } from '../lib/runtime.ts';
 import { icons, type IconName } from './icons.ts';
 import { CSS } from './style.ts';
 
@@ -126,7 +127,7 @@ export function shell(opts: ShellOpts): Response {
         ? raw(`<svg class="dlg-icon err" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m10 10 4 4m0-4-4 4M16 16l-4-4m4 4 4-4m-4 4-4-4"/></svg>`)
         : raw(`<svg class="dlg-icon info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 10v2M12 16h.01"/><path d="M12 16h.01"/>`);
   const flash = c.flash
-    ? h`<div class="${esc(dlgCls)}"><dialog open id="panel-message" aria-label="Panel notification"><div class="dlg-body">${dlgIcon}<div><h3>${kind === 'ok' ? 'Success' : kind === 'err' ? 'Error' : kind === 'warn' ? 'Warning' : 'Notice'}</h3><p>${esc(c.flash.text)}</p></div></div><form method="dialog" class="actions"><button class="btn">Close</button><button class="btn primary" autofocus>Got it</button></form></dialog></div>`
+    ? h`<div class="${esc(dlgCls)}"><dialog open id="panel-message" aria-label="Panel notification"><div class="dlg-body">${dlgIcon}<div><h3>${kind === 'ok' ? 'Success' : kind === 'err' ? 'Error' : kind === 'warn' ? 'Warning' : 'Notice'}</h3><p>${esc(c.flash.text)}</p></div></div><div class="actions"><button type="button" class="btn" onclick="amsCloseMessage()">Close</button><button type="button" class="btn primary" autofocus onclick="amsCloseMessage()">Got it</button></div></dialog></div>`
     : h``;
 
   const user = c.user;
@@ -190,6 +191,13 @@ export function shell(opts: ShellOpts): Response {
     var t=btn.parentNode.querySelector('span').textContent.trim();
     navigator.clipboard.writeText(t).then(function(){amsToast('Copied to clipboard')},function(){amsToast('Copy failed','err')});
   }
+  function amsCloseMessage(){
+    var msg=document.getElementById('panel-message');
+    if(!msg)return;
+    if(msg.open)msg.close();
+    var wrap=msg.closest('.ams-dlg');
+    if(wrap)wrap.remove();
+  }
   document.addEventListener('click',function(e){
     var b=e.target.closest('[data-copy]'); if(b){amsCopy(b);}
 
@@ -215,7 +223,13 @@ export function shell(opts: ShellOpts): Response {
 
   return new Response(fullPage({ title: `${title} · ${panelName}`, body: page, bodyClass: opts.bodyClass, headExtra: opts.headExtra }), {
     status: 200,
-    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      // Flash notifications are one-shot. Without clearing this cookie, browser
+      // refresh/back navigation reopens the same modal for its full lifetime.
+      ...(c.flash ? { 'Set-Cookie': cookie('ams_flash', '', { maxAge: 0, secure: isSecureRequest(c) }) } : {}),
+    },
   });
 }
 
