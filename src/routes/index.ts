@@ -10,6 +10,7 @@ import * as system from './system.ts';
 import * as cloudflare from './cloudflare.ts';
 import * as cloudflareKeys from './cloudflare-keys.ts';
 import * as api from './api.ts';
+import * as demo from './demo.ts';
 
 export function buildRouter(): Router {
   const r = new Router('');
@@ -105,6 +106,7 @@ export function buildRouter(): Router {
   r.post('/settings/system', system.systemAction);
   r.get('/docs', system.docs);
   r.get('/export', system.exportAll);
+  r.get('/demo/dialog', demo.dialogDemo);
 
   // JSON API used by the panel's own JS and by external automation
   r.get('/api/overview', api.overview);

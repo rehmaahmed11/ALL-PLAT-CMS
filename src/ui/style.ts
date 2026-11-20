@@ -156,6 +156,48 @@ input::placeholder,textarea::placeholder{color:var(--fg3)}
 .flash.ok{border-color:rgba(46,204,143,.4);background:rgba(46,204,143,.10);color:#9ef3cd}
 .flash.err{border-color:rgba(255,95,109,.45);background:rgba(255,95,109,.10);color:#ffbcc0}
 .flash.info{border-color:rgba(56,189,248,.4);background:rgba(56,189,248,.10);color:#b6e7ff}
+
+/* ---------- animated dialogs ---------- */
+.ams-dlg{position:fixed;inset:0;display:grid;place-items:center;padding:1rem;z-index:60}
+.ams-dlg dialog{
+  position:relative;background:var(--panel);border:1px solid var(--line2);border-radius:var(--r);
+  color:var(--fg);width:min(28rem,calc(100vw - 1.5rem));max-height:85vh;overflow:auto;
+  box-shadow:var(--shadow);animation:amsDlgIn .42s cubic-bezier(.16,1,.3,1) both;
+  border-top:5px solid;display:flex;flex-direction:column;gap:14px;padding:22px
+}
+.ams-dlg dialog::backdrop{background:rgba(3,6,12,.72);backdrop-filter:blur(5px);animation:amsBack .3s ease both}
+@keyframes amsDlgIn{from{opacity:0;transform:scale(.92) translateY(12px)}to{opacity:1;transform:none}}
+@keyframes amsBack{from{opacity:0}to{opacity:1}}
+.ams-dlg h3{margin:0 0 2px;font-size:1.05rem;display:flex;align-items:center;gap:10px}
+.ams-dlg p{margin:0 0 12px;color:var(--fg2);line-height:1.55;font-size:.92rem}
+.ams-dlg .dlg-body{display:flex;gap:12px;align-items:flex-start}
+.ams-dlg .dlg-icon{width:34px;height:34px;flex:none;display:grid;place-items:center;border-radius:50%;color:#fff;box-shadow:0 6px 16px -4px rgba(0,0,0,.35)}
+.ams-dlg .dlg-icon.ok{background:var(--ok);animation:amsPop .5s cubic-bezier(.18,.89,.32,1.28) both}
+.ams-dlg .dlg-icon.warn{background:var(--warn);animation:amsPulse 2.2s ease-in-out infinite}
+.ams-dlg .dlg-icon.err{background:var(--err);animation:amsShake .55s cubic-bezier(.36,.07,.19,.97) both}
+.ams-dlg .dlg-icon.info{background:var(--acc)}
+.ams-dlg .actions{display:flex;justify-content:flex-end;gap:10px;padding-top:8px;border-top:1px solid var(--line);margin-top:4px}
+.ams-dlg .actions .btn{min-width:88px}
+.ams-dlg.ok dialog{border-color:var(--ok);border-top-color:var(--ok)}
+.ams-dlg.ok dialog h3{color:var(--ok)}
+.ams-dlg.warn dialog{border-color:var(--warn);border-top-color:var(--warn)}
+.ams-dlg.warn dialog h3{color:var(--warn)}
+.ams-dlg.err dialog{border-color:var(--err);border-top-color:var(--err)}
+.ams-dlg.err dialog h3{color:var(--err)}
+.ams-dlg.info dialog{border-color:var(--acc);border-top-color:var(--acc)}
+.ams-dlg.info dialog h3{color:var(--acc)}
+
+@keyframes amsPop{0%{transform:scale(0)}100%{transform:scale(1)}}
+@keyframes amsPulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.12);opacity:.85}}
+@keyframes amsShake{0%,100%{transform:none}20%,60%{transform:translateX(-5px)}40%,80%{transform:translateX(5px)}}
+
+/* drawn checkmark inside the success dialog */
+.ams-check{width:30px;height:30px;flex:none}
+.ams-check circle{stroke-width:2.5;stroke:#fff;fill:none;stroke-dasharray:166;stroke-dashoffset:166;animation:amsCheckCircle .55s ease}
+.ams-check path{stroke:#fff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;fill:none;stroke-dasharray:48;stroke-dashoffset:48;animation:amsCheckDraw .4s ease .35s forwards}
+@keyframes amsCheckCircle{to{stroke-dashoffset:30}}
+@keyframes amsCheckDraw{to{stroke-dashoffset:0}}
+
 .note{border-left:3px solid var(--acc);background:rgba(91,140,255,.08);padding:10px 14px;border-radius:0 9px 9px 0;font-size:.86rem;color:var(--fg2)}
 .note.warn{border-color:var(--warn);background:rgba(242,178,60,.09)}
 .note.danger{border-color:var(--err);background:rgba(255,95,109,.09)}

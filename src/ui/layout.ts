@@ -116,8 +116,17 @@ export function shell(opts: ShellOpts): Response {
         </select></form>`
     : h``;
 
+  const kind = c.flash?.kind ?? 'info';
+  const dlgCls = `ams-dlg ${kind === 'ok' ? 'ok' : kind === 'err' ? 'err' : kind === 'warn' ? 'warn' : 'info'}`;
+  const dlgIcon = kind === 'ok'
+    ? raw(`<svg class="ams-check" viewBox="0 0 52 52"><circle cx="26" cy="26" r="25"/><path d="M14.1 27.2l7.1 7.2 16.7-16.8"/></svg>`)
+    : kind === 'warn'
+      ? raw(`<svg class="dlg-icon warn" viewBox="0 0 24 24"><path d="M12 4 2.5 20h19L12 4Z"/><path d="M12 10v4.5M12 17.5h.01"/></svg>`)
+      : kind === 'err'
+        ? raw(`<svg class="dlg-icon err" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m10 10 4 4m0-4-4 4M16 16l-4-4m4 4 4-4m-4 4-4-4"/></svg>`)
+        : raw(`<svg class="dlg-icon info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 10v2M12 16h.01"/><path d="M12 16h.01"/>`);
   const flash = c.flash
-    ? h`<dialog open id="panel-message" class="panel-dialog" aria-label="Panel notification"><div class="flash ${c.flash.kind}">${raw(icons[c.flash.kind === 'ok' ? 'check' : c.flash.kind === 'err' ? 'warning' : 'activity'])}<div>${c.flash.text}</div></div><form method="dialog"><button class="btn">Close</button></form></dialog>`
+    ? h`<div class="${esc(dlgCls)}"><dialog open id="panel-message" aria-label="Panel notification"><div class="dlg-body">${dlgIcon}<div><h3>${kind === 'ok' ? 'Success' : kind === 'err' ? 'Error' : kind === 'warn' ? 'Warning' : 'Notice'}</h3><p>${esc(c.flash.text)}</p></div></div><form method="dialog" class="actions"><button class="btn">Close</button><button class="btn primary" autofocus>Got it</button></form></dialog></div>`
     : h``;
 
   const user = c.user;

@@ -199,7 +199,7 @@ export type Ctx = {
   ip: string;
   host: string;
   panelPath: string;
-  flash: { kind: 'ok' | 'err' | 'info'; text: string } | null;
+  flash: { kind: 'ok' | 'err' | 'warn' | 'info'; text: string } | null;
   ctx?: ExecutionContext;
 };
 

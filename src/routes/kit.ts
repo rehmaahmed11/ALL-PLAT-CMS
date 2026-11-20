@@ -38,7 +38,7 @@ export function forbidden(c: Ctx): Response {
 }
 
 /** Redirect back with a flash message stored as a short-lived cookie. */
-export function flashRedirect(c: Ctx, to: string, kind: 'ok' | 'err' | 'info', text: string): Response {
+export function flashRedirect(c: Ctx, to: string, kind: 'ok' | 'err' | 'warn' | 'info', text: string): Response {
   // cookie() encodes the value; passing pre-encoded JSON would be encoded twice
   // and fail to parse on the way back.
   const val = JSON.stringify({ k: kind, t: text.slice(0, 400) });
@@ -50,8 +50,8 @@ export function readFlash(raw: string | undefined): Ctx['flash'] {
   try {
     const o = JSON.parse(raw);
     if (!o || typeof o.t !== 'string') return null;
-    const k = o.k === 'ok' || o.k === 'err' ? o.k : 'info';
-    return { kind: k as 'ok' | 'err' | 'info', text: o.t };
+    const k = o.k === 'ok' || o.k === 'err' || o.k === 'warn' ? o.k : 'info';
+    return { kind: k as 'ok' | 'err' | 'warn' | 'info', text: o.t };
   } catch {
     return null;
   }
