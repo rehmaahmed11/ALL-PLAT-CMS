@@ -1,5 +1,5 @@
 import type { Ctx } from '../types.ts';
-import { h, raw, esc, SafeHtml, cookie } from '../lib/http.ts';
+import { h, raw, esc, cookie, securityHeaders, SafeHtml } from '../lib/http.ts';
 import { isSecureRequest } from '../lib/runtime.ts';
 import { icons, type IconName } from './icons.ts';
 import { CSS } from './style.ts';
@@ -226,6 +226,7 @@ export function shell(opts: ShellOpts): Response {
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'no-store',
+      ...securityHeaders(isSecureRequest(c)),
       // Flash notifications are one-shot. Without clearing this cookie, browser
       // refresh/back navigation reopens the same modal for its full lifetime.
       ...(c.flash ? { 'Set-Cookie': cookie('ams_flash', '', { maxAge: 0, secure: isSecureRequest(c) }) } : {}),

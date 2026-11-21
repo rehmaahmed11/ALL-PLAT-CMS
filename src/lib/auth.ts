@@ -13,13 +13,21 @@
 
 import type { Ctx, Session, User } from '../types.ts';
 import { all, one, run, id } from '../db/index.ts';
-import { hashPassword, randomToken, sha256Hex, timingSafeEqual, verifyPassword } from './crypto.ts';
+import { b64url, hashPassword, kdfIterations, randomToken, sha256Hex, timingSafeEqual, verifyPassword } from './crypto.ts';
 import { bumpCounter, clearCounter, readCounter } from './kv.ts';
 
 export const SESSION_COOKIE = 'ams_sid';
 export const SESSION_TTL_MS = 1000 * 60 * 60 * 12; // 12 hours
 const MAX_ATTEMPTS = 8;
 const WINDOW_MS = 1000 * 60 * 15;
+
+/**
+ * Dummy credentials used when the account does not exist (or is disabled), so
+ * a failed login costs the same PBKDF2 work either way. This closes the timing
+ * side channel that would otherwise reveal which emails have accounts.
+ */
+const DUMMY_SALT = b64url(crypto.getRandomValues(new Uint8Array(16)));
+const DUMMY_HASH = b64url(crypto.getRandomValues(new Uint8Array(32)));
 
 export type LoginResult =
   | { ok: true; user: User; session: Session; token: string }
@@ -89,9 +97,9 @@ export async function createUser(
   return user;
 }
 
-export async function setPassword(db: any, userId: string, password: string): Promise<void> {
-  const { hash, salt, iterations } = await hashPassword(password, 100000);
-  await run(db, 'UPDATE users SET pass_hash=?, salt=?, iterations=? WHERE id=?', [hash, salt, iterations, userId]);
+export async function setPassword(db: any, userId: string, password: string, iterations = 100000): Promise<void> {
+  const { hash, salt, iterations: used } = await hashPassword(password, iterations);
+  await run(db, 'UPDATE users SET pass_hash=?, salt=?, iterations=? WHERE id=?', [hash, salt, used, userId]);
   await run(db, 'DELETE FROM sessions WHERE user_id=?', [userId]);
 }
 
@@ -114,7 +122,9 @@ export async function login(
   }
 
   const user = await findUserByEmail(db, ident);
-  const okPassword = user && !user.disabled ? await verifyPassword(input.password, user.salt, user.pass_hash, user.iterations) : false;
+  const okPassword = user && !user.disabled
+    ? await verifyPassword(input.password, user.salt, user.pass_hash, user.iterations)
+    : await verifyPassword(input.password, DUMMY_SALT, DUMMY_HASH, kdfIterations(env));
 
   await run(db, 'INSERT INTO logins (id,at,email,ok,ip,ua) VALUES (?,?,?,?,?,?)', [
     id('log'),
@@ -217,6 +227,12 @@ export async function verifyApiKey(db: any, header: string | null): Promise<ApiK
   const hash = await sha256Hex(m[1]);
   const row = await one<ApiKey & { id: string }>(db, 'SELECT * FROM apikeys WHERE token_hash=?', [hash]);
   if (!row) return null;
-  await run(db, 'UPDATE apikeys SET last_used=? WHERE id=?', [Date.now(), row.id]);
+  // "Last used" is a display convenience, not a hot path: refresh it at most
+  // once a minute so API polling does not write to D1 on every request.
+  const at = Date.now();
+  if (row.last_used == null || at - Number(row.last_used) > 60_000) {
+    await run(db, 'UPDATE apikeys SET last_used=? WHERE id=?', [at, row.id]);
+    row.last_used = at;
+  }
   return row;
 }

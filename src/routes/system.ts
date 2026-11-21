@@ -10,7 +10,7 @@ import { createUser, createApiKey, destroyUserSessions, setPassword } from '../l
 import { getSettings, saveSettings, type PanelSettings } from '../lib/kv.ts';
 import { audit } from '../lib/audit.ts';
 import { errText } from '../lib/runtime.ts';
-import { generatePassword } from '../lib/crypto.ts';
+import { generatePassword, kdfIterations } from '../lib/crypto.ts';
 import { validateEmail, validatePassword } from './validation.ts';
 import { makeZip } from '../lib/deploy.ts';
 
@@ -103,7 +103,7 @@ export const teamInvite: Handler = async (c) => {
   if (bad) return flashRedirect(c, P(c, '/team'), 'err', bad);
   if (!['admin', 'viewer'].includes(role)) return flashRedirect(c, P(c, '/team'), 'err', 'Pick a valid role.');
   try {
-    const user = await createUser(c.env.DB, { email, username, name, password, role });
+    const user = await createUser(c.env.DB, { email, username, name, password, role, iterations: kdfIterations(c.env) });
     await audit(c, 'team.create', 'user', user.id, { email, role });
     return flashRedirect(c, P(c, '/team'), 'ok', `${email} can now sign in as ${role}.`);
   } catch {

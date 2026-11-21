@@ -1,5 +1,5 @@
 import type { Ctx } from '../types.ts';
-import { redirect, cookie, esc, json, SafeHtml } from '../lib/http.ts';
+import { redirect, cookie, esc, json, securityHeaders, SafeHtml } from '../lib/http.ts';
 import { csrfOk, SESSION_COOKIE } from '../lib/auth.ts';
 import { isSecureRequest } from '../lib/runtime.ts';
 
@@ -33,7 +33,7 @@ export function forbidden(c: Ctx): Response {
     `<!doctype html><meta charset="utf-8"><title>Forbidden</title><body style="font:16px system-ui;padding:40px;background:#0a0d14;color:#e7ecf5">
      <h1>403 — not allowed</h1><p>Your role (<b>${esc(c.user?.role ?? 'guest')}</b>) cannot do that.</p>
      <p><a style="color:#5b8cff" href="${esc(P(c, '/'))}">Back to the panel</a></p></body>`,
-    { status: 403, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
+    { status: 403, headers: { 'Content-Type': 'text/html; charset=utf-8', ...securityHeaders() } },
   );
 }
 
@@ -100,5 +100,8 @@ export function scopedSiteId(c: Ctx): string {
 }
 
 export function html(body: SafeHtml, status = 200): Response {
-  return new Response(String(body), { status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+  return new Response(String(body), {
+    status,
+    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...securityHeaders() },
+  });
 }

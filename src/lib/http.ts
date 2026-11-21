@@ -1,8 +1,37 @@
 /**
- * Tiny HTTP helpers: cookies, HTML/JSON responses, redirects, form parsing.
- * No framework beyond Hono for the top-level dispatch — these run on both
- * Workers and Node.
+ * Tiny HTTP helpers: cookies, HTML/JSON responses, redirects, form parsing,
+ * and the security headers shared by the panel. These run on both Workers and
+ * Node.
  */
+
+/**
+ * Panel CSP. Inline scripts/styles are required by the existing shell (theme
+ * toggle, dialogs, confirm prompts), so 'unsafe-inline' is allowed for those
+ * two directives; everything else is locked to same-origin, with objects,
+ * base tags and framing disabled. User-site bundles are served without this
+ * header (see routes/public.ts) so a customer's own scripts keep working.
+ */
+export const CONTENT_SECURITY_POLICY =
+  "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
+  "img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; " +
+  "base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
+
+/**
+ * Baseline security headers for panel responses. `secure` adds HSTS; it must
+ * only be true for HTTPS requests (browsers ignore HSTS over plain HTTP).
+ */
+export function securityHeaders(secure = false): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Security-Policy': CONTENT_SECURITY_POLICY,
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'X-Content-Type-Options': 'nosniff',
+    'Permissions-Policy': 'geolocation=(), microphone=(), camera=()',
+    'Cross-Origin-Opener-Policy': 'same-origin',
+  };
+  if (secure) headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains';
+  return headers;
+}
 
 export function parseCookies(header: string | null): Record<string, string> {
   const out: Record<string, string> = {};
@@ -13,7 +42,12 @@ export function parseCookies(header: string | null): Record<string, string> {
     const k = part.slice(0, i).trim();
     const v = part.slice(i + 1).trim();
     if (!k) continue;
-    out[k] = decodeURIComponent(v);
+    // A malformed cookie value must not be able to throw and 500 the request.
+    try {
+      out[k] = decodeURIComponent(v);
+    } catch {
+      out[k] = v;
+    }
   }
   return out;
 }
@@ -35,25 +69,28 @@ export function cookie(
 export function json(data: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(data, null, 2), {
     status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers },
+    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...securityHeaders(), ...headers },
   });
 }
 
 export function htmlResponse(body: string, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(body, {
     status,
-    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...headers },
+    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...securityHeaders(), ...headers },
   });
 }
 
 export function redirect(location: string, cookies: string[] = [], status = 303): Response {
-  const headers = new Headers({ Location: location, 'Cache-Control': 'no-store' });
+  const headers = new Headers({ Location: location, 'Cache-Control': 'no-store', ...securityHeaders() });
   for (const c of cookies) headers.append('Set-Cookie', c);
   return new Response(null, { status, headers });
 }
 
 export function textResponse(body: string, status = 200, contentType = 'text/plain; charset=utf-8'): Response {
-  return new Response(body, { status, headers: { 'Content-Type': contentType, 'Cache-Control': 'no-store' } });
+  return new Response(body, {
+    status,
+    headers: { 'Content-Type': contentType, 'Cache-Control': 'no-store', ...securityHeaders() },
+  });
 }
 
 /** Escapes text for HTML output. */

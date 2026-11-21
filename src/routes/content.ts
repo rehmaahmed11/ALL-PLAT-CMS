@@ -1,5 +1,5 @@
 import type { Ctx, Handler } from '../types.ts';
-import { h, raw, esc, bytesHuman, timeAgo } from '../lib/http.ts';
+import { h, raw, esc, bytesHuman, textResponse, timeAgo } from '../lib/http.ts';
 import { shell, pageHeader, badge, statusBadge, empty, csrfInput } from '../ui/layout.ts';
 import { icons } from '../ui/icons.ts';
 import { P, requireUser, q, consumeFlash, csrfGuard, flashRedirect } from './kit.ts';
@@ -292,22 +292,40 @@ export const mediaUpload: Handler = async (c) => {
   }
 };
 
+/**
+ * Media is served from the panel origin, so a file the browser renders as a
+ * document (HTML, SVG, XML, script) would execute with the panel session.
+ * Only genuinely safe types may render inline; everything else downloads.
+ */
+const MEDIA_INLINE_MIME =
+  /^(image\/(png|jpe?g|gif|webp|avif|bmp|x-icon)|text\/(plain|csv|markdown)|application\/(pdf|json))$/;
+const MEDIA_DANGEROUS_MIME =
+  /^(text\/html|image\/svg\+xml|text\/xml|application\/(javascript|x-javascript|ecmascript|xml|x-shockwave-flash))/i;
+
 export const mediaRaw: Handler = async (c) => {
   const m = await one<any>(c.env.DB, 'SELECT * FROM media WHERE id=?', [c.params.id]);
-  if (!m) return new Response('Not found', { status: 404 });
+  if (!m) return textResponse('Not found', 404);
   if (!c.user) {
     // Media is public only for published sites; otherwise require a session.
     const site = await getSite(c.env.DB, m.site_id);
-    if (!site || site.status === 'paused') return new Response('Not found', { status: 404 });
+    if (!site || site.status === 'paused') return textResponse('Not found', 404);
   }
   const file = await getFile(c.env.KV, m.key);
-  if (!file) return new Response('Gone', { status: 404 });
+  if (!file) return textResponse('Gone', 410);
+  const mime = String(m.mime || 'application/octet-stream');
+  const dangerous = MEDIA_DANGEROUS_MIME.test(mime);
+  const inline = !dangerous && MEDIA_INLINE_MIME.test(mime);
+  const filename = m.name.replace(/"/g, '');
   return new Response(file.data, {
     headers: {
-      'Content-Type': m.mime,
+      // Dangerous types are flattened to a download so they can never run as
+      // a document in the panel origin.
+      'Content-Type': dangerous ? 'application/octet-stream' : mime,
+      'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename="${filename}"`,
       'Cache-Control': 'public, max-age=31536000, immutable',
       'X-Content-Type-Options': 'nosniff',
-      'Content-Disposition': `inline; filename="${m.name.replace(/"/g, '')}"`,
+      'Referrer-Policy': 'no-referrer',
+      'Content-Security-Policy': "default-src 'none'",
     },
   });
 };
