@@ -1,10 +1,11 @@
 import type { Ctx, Handler } from '../types.ts';
-import { h, raw, esc, redirect } from '../lib/http.ts';
+import { h, raw, esc, redirect, securityHeaders } from '../lib/http.ts';
+import { isSecureRequest } from '../lib/runtime.ts';
 import { fullPage } from '../ui/layout.ts';
 import { iconMark } from '../ui/mark.ts';
 import { getSettings } from '../lib/kv.ts';
 import { login, destroySession, countUsers } from '../lib/auth.ts';
-import { P, csrfGuard, sessionCookie, killSessionCookie, flashRedirect } from './kit.ts';
+import { P, requireUser, csrfGuard, sessionCookie, killSessionCookie, flashRedirect } from './kit.ts';
 import { validatePassword } from './validation.ts';
 
 export const loginPage: Handler = async (c) => {
@@ -33,7 +34,11 @@ export const loginPage: Handler = async (c) => {
     </div>
   </div>`;
   return new Response(fullPage({ title: 'Sign in', body, theme: settings.theme, bodyClass: 'auth' }), {
-    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      ...securityHeaders(isSecureRequest(c)),
+    },
   });
 };
 
@@ -65,6 +70,8 @@ export const logout: Handler = async (c) => {
 };
 
 export const accountPage: Handler = async (c) => {
+  const gate = requireUser(c);
+  if (gate) return gate;
   const { shell, pageHeader, csrfInput, field, badge } = await import('../ui/layout.ts');
   const { listSessions } = await import('../lib/auth.ts');
   const sessions = await listSessions(c.env, c.user!.id);
@@ -135,7 +142,7 @@ export const accountSubmit: Handler = async (c) => {
   if (gate) return gate;
   const action = String(c.form?.get('action') ?? '');
   const { run } = await import('../db/index.ts');
-  const { verifyPassword } = await import('../lib/crypto.ts');
+  const { kdfIterations, verifyPassword } = await import('../lib/crypto.ts');
   const { setPassword, destroyUserSessions } = await import('../lib/auth.ts');
   const { audit } = await import('../lib/audit.ts');
 
@@ -163,7 +170,7 @@ export const accountSubmit: Handler = async (c) => {
     if (pw !== pw2) return flashRedirect(c, P(c, '/account'), 'err', 'New passwords do not match.');
     const bad = validatePassword(pw);
     if (bad) return flashRedirect(c, P(c, '/account'), 'err', bad);
-    await setPassword(c.env.DB, c.user!.id, pw);
+    await setPassword(c.env.DB, c.user!.id, pw, kdfIterations(c.env));
     await audit(c, 'account.password', 'user', c.user!.id);
     return redirect(P(c, '/login'), [killSessionCookie(c)]);
   }

@@ -167,14 +167,21 @@ border:1px solid rgba(56,189,248,.4);background:rgba(56,189,248,.12);padding:3px
 </div></body></html>`;
   return new Response(body, {
     status,
-    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': `no-store`, 'Retry-After': String(retrySeconds) },
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': `no-store`,
+      'Retry-After': String(retrySeconds),
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'Referrer-Policy': 'strict-origin-when-cross-origin',
+      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'",
+    },
   });
 }
 
 async function noSitePage(url: URL, env: Env): Promise<Response> {
-  const anySite = await one<any>(env.DB, 'SELECT name FROM sites LIMIT 1');
-  const message = anySite
-    ? `No site is configured for <span class="mono">${esc(url.hostname)}</span>. Add the hostname to a site in the panel's Domains page, or point it at a different Worker.`
-    : `This Worker is not serving a site on <span class="mono">${esc(url.hostname)}</span> yet. Open the panel to create your first site.`;
+  // One generic message either way: do not reveal whether the panel has any
+  // sites configured.
+  const message = `No site is configured for <span class="mono">${esc(url.hostname)}</span>. Add the hostname to a site in the panel's Domains page, or point it at a different Worker.`;
   return htmlPage(404, 'No site at this address', message, 60);
 }

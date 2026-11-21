@@ -94,6 +94,16 @@ export function fnv1a(str: string): string {
   return h.toString(36);
 }
 
+/**
+ * The documented KDF_ITERATIONS override, clamped to a sane range so a typo
+ * cannot make logins free (or impossibly slow). Defaults to 100000.
+ */
+export function kdfIterations(env?: any): number {
+  const raw = Number(env?.KDF_ITERATIONS);
+  if (!Number.isFinite(raw) || raw <= 0) return 100000;
+  return Math.min(1000000, Math.max(10000, Math.trunc(raw)));
+}
+
 /** Human-friendly password generator for credentials the panel hands out. */
 export function generatePassword(len = 20): string {
   const alphabet = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!#%*+-_=?';

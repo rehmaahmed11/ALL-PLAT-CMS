@@ -1,5 +1,5 @@
 import type { Ctx, Handler } from '../types.ts';
-import { h, raw, esc, redirect, cookie } from '../lib/http.ts';
+import { h, raw, esc, redirect, cookie, securityHeaders } from '../lib/http.ts';
 import { shell, pageHeader, statCard, badge, statusBadge, empty, sparkline, copyBox } from '../ui/layout.ts';
 import { icons } from '../ui/icons.ts';
 import { P, requireUser, q, consumeFlash } from './kit.ts';
@@ -249,7 +249,7 @@ export const healthz: Handler = async (c) => {
       checks: { database: db, kv, installed: users > 0 },
       ms: Date.now() - started,
     }),
-    { status: ok ? 200 : 503, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } },
+    { status: ok ? 200 : 503, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...securityHeaders() } },
   );
 };
 

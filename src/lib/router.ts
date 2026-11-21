@@ -37,7 +37,12 @@ export class Router {
       for (let i = 0; i < parts.length; i++) {
         const p = route.parts[i];
         if (p.startsWith(':')) {
-          params[p.slice(1)] = decodeURIComponent(parts[i]);
+          // Malformed percent-encoding must not throw and 500 the request.
+          try {
+            params[p.slice(1)] = decodeURIComponent(parts[i]);
+          } catch {
+            params[p.slice(1)] = parts[i];
+          }
         } else if (p !== parts[i]) {
           ok = false;
           break;

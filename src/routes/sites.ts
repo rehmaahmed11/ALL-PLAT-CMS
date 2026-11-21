@@ -1,5 +1,5 @@
 import type { Ctx, Handler } from '../types.ts';
-import { h, raw, esc, redirect, timeAgo, bytesHuman } from '../lib/http.ts';
+import { h, raw, esc, redirect, securityHeaders, timeAgo, bytesHuman } from '../lib/http.ts';
 import { shell, pageHeader, statCard, badge, statusBadge, empty, copyBox, csrfInput, sparkline } from '../ui/layout.ts';
 import { icons } from '../ui/icons.ts';
 import { P, requireUser, requireAdmin, q, consumeFlash, csrfGuard, flashRedirect } from './kit.ts';
@@ -736,7 +736,7 @@ export const preview: Handler = async (c) => {
       `<!doctype html><meta charset=utf-8><body style="font:15px system-ui;padding:40px;background:#0a0d14;color:#e7ecf5">
        <h1>Nothing deployed</h1><p>Upload a static bundle on the Deployments page, or set an origin URL for this site.</p>
        <p><a style="color:#5b8cff" href="${esc(P(c, `/deployments?site=${site.id}`))}">Go to deployments</a></p></body>`,
-      { status: 404, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
+      { status: 404, headers: { 'Content-Type': 'text/html; charset=utf-8', ...securityHeaders() } },
     );
   }
   return serveBundlePath(c, site, active, '/', true);

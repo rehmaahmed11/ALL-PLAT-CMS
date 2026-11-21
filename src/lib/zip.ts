@@ -24,6 +24,11 @@ const SIG_EOCD = 0x06054b50;
 const SIG_CENTRAL = 0x02014b50;
 const SIG_LOCAL = 0x04034b50;
 const MAX_ENTRIES = 20000;
+/**
+ * Guard against decompression bombs: a small stored zip can declare a huge
+ * uncompressed size. Legitimate web bundles never need a single 256 MB file.
+ */
+export const MAX_ENTRY_BYTES = 256 * 1024 * 1024;
 
 function u16(dv: DataView, off: number): number {
   return dv.getUint16(off, true);
@@ -88,7 +93,13 @@ export type Resolved = { entry: ZipEntry; path: string } | null;
  * people get when they zip a folder instead of its contents.
  */
 export function resolvePath(index: ZipIndex, rawPath: string): Resolved {
-  let p = decodeURIComponent(rawPath.split('?')[0]).replace(/^\/+/, '');
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(rawPath.split('?')[0]);
+  } catch {
+    decoded = rawPath.split('?')[0];
+  }
+  let p = decoded.replace(/^\/+/, '');
   const topDirs = new Set<string>();
   for (const [key] of index.entries) {
     const slash = key.indexOf('/');
@@ -130,6 +141,9 @@ export async function extractEntry(data: ArrayBuffer, entry: ZipEntry): Promise<
   if (start + entry.compressedSize > data.byteLength) throw new Error('Corrupt zip: entry runs past end of file');
   const raw = new Uint8Array(data, start, entry.compressedSize);
 
+  if (entry.size > MAX_ENTRY_BYTES) {
+    throw new Error(`Zip entry is too large (declared ${entry.size} bytes)`);
+  }
   if (entry.method === 0) return raw;
   if (entry.method !== 8) throw new Error(`Unsupported compression method ${entry.method}`);
 

@@ -1,13 +1,18 @@
 import type { Ctx, Env } from '../types.ts';
-import { h, raw, esc, redirect, cookie } from '../lib/http.ts';
+import { h, raw, esc, redirect, cookie, securityHeaders } from '../lib/http.ts';
 import { createUser, countUsers, SESSION_TTL_MS } from '../lib/auth.ts';
 import { ensureSchema, run, id } from '../db/index.ts';
-import { saveSettings, getSettings } from '../lib/kv.ts';
+import { bumpCounter, clearCounter, getSettings, readCounter, saveSettings } from '../lib/kv.ts';
+import { kdfIterations, timingSafeEqual } from '../lib/crypto.ts';
 import { isSecureRequest, clientIp } from '../lib/runtime.ts';
 import { fullPage } from '../ui/layout.ts';
 import { iconMark } from '../ui/mark.ts';
 import { BUNDLED_CMS_REF, BUNDLED_CMS_REPOSITORY } from '../lib/cms-repository.js';
 import { validateEmail } from './validation.ts';
+
+/** Brute-force guard for the one-shot installer's optional setup token. */
+const INSTALL_MAX_ATTEMPTS = 10;
+const INSTALL_WINDOW_MS = 1000 * 60 * 15;
 
 const INSTALL_CSS = `
 <style>
@@ -34,6 +39,14 @@ export async function installWizard(
 
   if (request.method === 'POST') {
     const form = await request.formData();
+    // Throttle setup attempts per address so PANEL_SETUP_TOKEN cannot be
+    // brute-forced online. The wizard is one-shot, so a legitimate install is
+    // unaffected (one attempt).
+    const rlKey = `rl:install:${clientIp(request)}`;
+    const rl = await readCounter(env.KV, rlKey);
+    if (rl.count >= INSTALL_MAX_ATTEMPTS && rl.resetAt > Date.now()) {
+      errors.push('Too many setup attempts from this address. Please try again later.');
+    }
     const panelName = String(form.get('panelName') ?? '').trim();
     const email = String(form.get('email') ?? '').trim().toLowerCase();
     const username = String(form.get('username') ?? '').trim().toLowerCase();
@@ -47,16 +60,27 @@ export async function installWizard(
     if (!/^[a-z0-9][a-z0-9_.-]{2,31}$/.test(username)) errors.push('Username: 3-32 characters, letters/numbers/._- only.');
     if (password.length < 10) errors.push('Password must be at least 10 characters.');
     if (password !== password2) errors.push('Passwords do not match.');
-    if (env.PANEL_SETUP_TOKEN && token !== String(env.PANEL_SETUP_TOKEN)) {
+    if (env.PANEL_SETUP_TOKEN && !timingSafeEqual(token, String(env.PANEL_SETUP_TOKEN))) {
       errors.push('Setup token does not match PANEL_SETUP_TOKEN for this deployment.');
     }
     if (!errors.length && (await countUsers(env.DB)) > 0) {
       return redirect(`${opts.panelPath}/login`);
     }
+    if (errors.length && rl.count < INSTALL_MAX_ATTEMPTS) {
+      await bumpCounter(env.KV, rlKey, INSTALL_WINDOW_MS).catch(() => {});
+    }
 
     if (!errors.length) {
+      await clearCounter(env.KV, rlKey).catch(() => {});
       await ensureSchema(env.DB);
-      const user = await createUser(env.DB, { email, username, name: name || username, password, role: 'owner' });
+      const user = await createUser(env.DB, {
+        email,
+        username,
+        name: name || username,
+        password,
+        role: 'owner',
+        iterations: kdfIterations(env),
+      });
       await saveSettings(env.KV, {
         panelName: panelName || 'AMS Cloud Panel',
         cmsRepository: BUNDLED_CMS_REPOSITORY,
@@ -159,7 +183,11 @@ export async function installWizard(
 
   return new Response(fullPage({ title: `Set up ${settings.panelName}`, body, theme: settings.theme }), {
     status: errors.length ? 400 : 200,
-    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      ...securityHeaders(secure),
+    },
   });
 }
 
